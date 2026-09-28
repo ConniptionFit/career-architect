@@ -416,6 +416,8 @@ class TokenGate:
                 elif key == b"authorization" and value[:7].lower() == b"bearer ":
                     got = value[7:].strip()
             if not hmac.compare_digest(got, self.token):
+                # Enough to tell a caller that sent no token (a gateway that dropped the header) from one that sent a wrong one. Never the value.
+                log.warning("unauthorized request to %s: token header %s", scope["path"], "missing" if not got else "present but wrong")
                 await JSONResponse({"error": "unauthorized"}, status_code=401)(scope, receive, send)
                 return
         await self.app(scope, receive, send)

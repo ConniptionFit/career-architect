@@ -359,6 +359,31 @@ class Unsecured(unittest.TestCase):
         self.assertNotIsInstance(srv.build_app(None), srv.TokenGate)
         self.assertIsInstance(srv.build_app("x"), srv.TokenGate)
 
+    def test_a_rejected_request_is_logged_without_the_token(self):
+        import asyncio as aio
+        sent = []
+
+        async def app(scope, receive, send):
+            sent.append("reached the app")
+
+        gate = srv.TokenGate(app, "correct-horse")
+
+        async def call(headers):
+            async def send(msg):
+                if msg["type"] == "http.response.start":
+                    sent.append(msg["status"])
+            await gate({"type": "http", "path": "/mcp", "headers": headers}, None, send)
+
+        with self.assertLogs("career-mcp", level="WARNING") as cm:
+            aio.run(call([]))
+            aio.run(call([(b"x-career-token", b"wrong-guess-123")]))
+        text = "\n".join(cm.output)
+        self.assertIn("missing", text)
+        self.assertIn("present but wrong", text)
+        self.assertNotIn("wrong-guess-123", text)
+        self.assertNotIn("correct-horse", text)
+        self.assertEqual(sent, [401, 401])
+
     def test_logging_defaults_to_warning_so_tool_errors_are_not_logged(self):
         import os
         import subprocess
