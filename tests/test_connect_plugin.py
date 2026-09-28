@@ -72,6 +72,9 @@ class Generator(unittest.TestCase):
             for name in (".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", "README.md", "LICENSE"):
                 self.assertTrue((target / name).exists(), name)
             self.assertFalse((target / "skills" / "jobs" / "SKILL.md.template").exists())
+            readme = (target / "README.md").read_text()
+            self.assertNotIn("For the administrator", readme, "the people who install it are not shown the maintainer's notes")
+            self.assertNotIn("template-only", readme)
 
     def test_it_refuses_a_wrong_address_and_a_used_folder(self):
         with tempfile.TemporaryDirectory() as tmp:
