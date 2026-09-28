@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.3.0, server 1.2.0 (2026-09-28)
+
+- **The workspace location is fixed: `AI/JobSearch/<name>`.** Every deployment of this skill uses the same top-level path, found (or made) by walking `AI` then `JobSearch` rather than searching Drive for a folder named `Career Architect`. Inside `JobSearch`, one folder per person, named after them, holds everything that folder used to hold. This lets several people share one Google account (a family, for example) without their records colliding, and removes the "found two folders with this name somewhere in Drive" failure mode by construction. `jobs/references/storage.md`, `onboarding.md` and `troubleshooting.md` are rewritten for it; nothing in the server or the vMCP changed. The user's own records were migrated to `AI/JobSearch/John/`.
+- No tool list or server change, so no vMCP re-apply is needed for this release; deploying the server ships the new instructions.
+
 ## 2.2.0, server 1.2.0 (2026-09-28)
 
 - **The skill is served by the connector.** New tool `career_architect__guide` returns the skill's own documents (`start` is `SKILL.md`; `workflows/score`, `references/storage` and the rest by path) from the server image. A client that has the Jobs connector therefore always reads the current instructions, whether or not it has, or has updated, a copy of the skill. Deploying the server (or applying the vMCP spec) is what publishes a change; nothing has to reach each person's machine. The vMCP description and the tool description tell the assistant to call it first. 38 tools in total.

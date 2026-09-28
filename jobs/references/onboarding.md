@@ -1,6 +1,6 @@
 # Onboarding a new person
 
-Use when the person has no `Career Architect` folder, or asks to set up their records. The goal is a workspace in their own Drive, a first set of atoms they confirmed, and a Master resume in Reactive Resume. Do it in short steps and say what each one creates. A first session usually covers steps 1 to 4; the rest can wait.
+Use when the person has no workspace folder under `AI/JobSearch` (`references/storage.md`, "Find the workspace"), or asks to set up their records. The goal is a workspace in their own Drive, a first set of atoms they confirmed, and a Master resume in Reactive Resume. Do it in short steps and say what each one creates. A first session usually covers steps 1 to 4; the rest can wait.
 
 ## 1. Confirm access before creating anything
 
@@ -12,9 +12,9 @@ If none of these tools exist, the person is not connected to the Jobs server at 
 
 ## 2. Create the workspace
 
-Ask one question first: **where in your Drive should the `Career Architect` folder go?** (Default: My Drive.) Then create, with `google_drive__create_folder` (`parent_id` for the inner ones):
+The location is fixed (`references/storage.md`, "Find the workspace"): `AI/JobSearch/<their name>`, found or created the same way for everyone. Ask one question first: **what's your first name (or what would you like your folder called)?** Then, inside `JobSearch`, create with `google_drive__create_folder` (`parent_id` for the inner ones):
 
-`Career Architect`, and inside it `jobs` and `_history`.
+`<their name>`, and inside it `jobs` and `_history`. If a folder with that name already exists there and is not them (check `profile` inside it), ask for a different name.
 
 Then create the documents from the templates in `assets/`, filled from the conversation:
 

@@ -107,7 +107,7 @@ If you need a true sign-in whitelist (only accounts you create can sign in), Obo
 2. Add them by name to both `Career Architect users` policies (MCP Servers and Skills), and to the Jobs vMCP's profile (section 4).
 3. Identity: create their account in your identity provider and add them to the Reactive Resume group. If sign-ups are disabled in Reactive Resume (`FLAG_DISABLE_SIGNUPS` also blocks single-sign-on sign-ups), lift it while they sign in once or create the account another way.
 4. They open the Jobs vMCP in Obot (or connect it from their client) and sign in to each component with their own accounts: Google (Drive and Docs) and Reactive Resume.
-5. First conversation: they run the `jobs` skill, which finds no `Career Architect` folder and runs onboarding (`jobs/references/onboarding.md`). They should create or choose a Master resume in Reactive Resume first (its template and design carry over to every tailored resume).
+5. First conversation: they run the `jobs` skill, which finds no folder for them under `AI/JobSearch` and runs onboarding (`jobs/references/onboarding.md`). They should create or choose a Master resume in Reactive Resume first (its template and design carry over to every tailored resume).
 
 ### Someone leaves
 

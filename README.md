@@ -17,7 +17,7 @@ Google Docs   Google Drive       career-architect    Reactive Resume
    |               |                     |                  |
    +-------+-------+                     |                  |
            |                             |                  |
-  Career Architect/ folder       checks and builders   resumes, cover
+  AI/JobSearch/<name>/           checks and builders   resumes, cover
   profile, rules, facts,                               letters, tracker
   skills index, job texts
 ```
@@ -41,7 +41,7 @@ Google Docs   Google Drive       career-architect    Reactive Resume
 1. Run the MCP server next to Obot (`mcp-server/compose.example.yaml`).
 2. Register it, Reactive Resume, Google Drive and Google Docs as MCP servers in Obot, and bundle them as one **Jobs** vMCP with the tool allowlist in `deploy/jobs-vmcp.json`.
 3. Add this repository as a Skill source in Obot (and, for the Claude apps, as a plugin marketplace); grant the group access.
-4. Onboard each person: an account, access, and a first conversation that creates their `Career Architect` Drive folder.
+4. Onboard each person: an account, access, and a first conversation that creates their `AI/JobSearch/<name>` Drive folder.
 
 The runbook, with every value to enter, is [docs/OPERATIONS.md](docs/OPERATIONS.md). Design and decisions are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); what is stored, where, and what is protected is in [docs/SECURITY.md](docs/SECURITY.md).
 

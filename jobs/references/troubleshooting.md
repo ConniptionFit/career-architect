@@ -12,7 +12,7 @@ Diagnose one step at a time, report the exact failing step, and stop. Do not ret
 | `build_index` reports `role id duplicate` or `atom id missing or duplicate` | Two fragments define the same id, usually a role saved twice | Find the older one in the folder, and move it to `_history` (rename only; never trash) |
 | `build_index` reports YAML errors | A hand edit broke the syntax, or an alias (`&x`, `*x`) was used (not allowed) | Show the person the line; fix it in the fragment |
 | A document looks garbled, wrapped or has a stray `---` at the top | It was read with `google_drive__read_file` (a PDF export), or Docs' leading section break was edited into the text | Read it with `google_docs__get_document`; run `normalize_text` with `source: docs` before editing |
-| Drive search finds two `Career Architect` folders | A copy or a shared folder | Ask which; never merge them |
+| `AI/JobSearch` has two folders that could be the person, or two `AI` or `JobSearch` folders exist | A copy, a shared folder, or another exact-name match | Ask which; never merge them |
 | Drive or Docs write refused | Read-only access to a shared folder, or the Google sign-in expired | Tell the person; they need edit access or a workspace of their own, or to reconnect Google |
 | A new document sits in the root of My Drive | `create_document` always creates there and the move step failed | `google_drive__update_file` with `new_parent_id` set to the right folder |
 | Reactive Resume tools fail with an authorisation error | The person has not signed in to Reactive Resume through the Jobs server, or their session expired | Have them reconnect Reactive Resume in the Jobs server's settings (Obot: connected servers). Never ask for a key |

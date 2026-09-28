@@ -1,6 +1,6 @@
 # Storage protocol: the person's Google Drive
 
-The person's records are Google Docs holding plain text, in one folder they own. They are read and written through the Jobs toolset's Google Docs and Google Drive tools, which act as the signed-in person. The career-architect tools never see Drive; you read a document and pass its text to them.
+The person's records are Google Docs holding plain text, in one folder they own, at a **fixed location**: `AI/JobSearch/<their name>`, the same path in every deployment of this skill. It is fixed so the location never has to be searched for or guessed, and so several people signed into the same Drive (a family, a shared account) each get their own folder instead of colliding on one generic name. They are read and written through the Jobs toolset's Google Docs and Google Drive tools, which act as the signed-in person. The career-architect tools never see Drive; you read a document and pass its text to them.
 
 Tools used (full names as the Jobs toolset lists them; a client may put its own prefix in front):
 
@@ -21,18 +21,20 @@ Nothing else exists in the toolset, and you do not look for another way: no dele
 ## Layout
 
 ```
-Career Architect/                 folder, marker of the workspace; lives anywhere in the person's Drive
-  profile                         YAML front matter + notes (identity, never_claim, known_gaps, pending, RR Master id)
-  rules                           standing wording rules (years framing, titles, voice, scope limits)
-  skills                          GENERATED index from build_index; never edited by hand
-  facts - shared                  aliases, credentials, education, log
-  facts - <role-id>               one document per role: its atoms (role id = the `id` field, kebab-case)
-  jobs/                           folder
-    <slug>/                       folder per posting (slug = company-role, kebab-case)
-      jd                          the posting text
-      selection                   the resume selection (YAML), once written
-      cover                       the cover letter (YAML), once written
-  _history/                       folder; superseded versions of any document, never deleted by this skill
+AI/                                folder, fixed: the same top-level name in every deployment
+  JobSearch/                       folder, fixed: everything this skill keeps lives under here
+    <name>/                        folder per person, named after them (John's is `John`); the workspace
+      profile                      YAML front matter + notes (identity, never_claim, known_gaps, pending, RR Master id)
+      rules                        standing wording rules (years framing, titles, voice, scope limits)
+      skills                       GENERATED index from build_index; never edited by hand
+      facts - shared               aliases, credentials, education, log
+      facts - <role-id>            one document per role: its atoms (role id = the `id` field, kebab-case)
+      jobs/                        folder
+        <slug>/                    folder per posting (slug = company-role, kebab-case)
+          jd                       the posting text
+          selection                the resume selection (YAML), once written
+          cover                    the cover letter (YAML), once written
+      _history/                    folder; superseded versions of any document, never deleted by this skill
 ```
 
 Why one document per role: a whole career runs to tens of kilobytes, and a resume needs two or three roles. The `skills` index carries what scoring and linting need (years, depth, evidence atom ids, aliases, credentials, career length) plus a `# Roles` table saying which role holds which atom, so a task opens only the fragments it cites.
@@ -41,13 +43,16 @@ Every document is a Google Doc holding plain text. Titles are exact and case-sen
 
 ## Find the workspace
 
-1. `google_drive__list_files` with `mime_type: application/vnd.google-apps.folder` and `file_name_contains: Career Architect`. Names match as substrings, so keep only results named exactly `Career Architect`.
-2. One folder: that is the workspace; note its id. Several: list them with their `modifiedTime` and ask which one. None: onboarding (`references/onboarding.md`).
-3. List a folder with `parent_id: <folder id>`; add `file_name_contains` for one document (`profile`, `facts - `; remember `facts` also matches `facts - shared`). Ids are stable: keep them for the rest of the task instead of searching again. The `jobs` folder holds one folder per posting; list `jobs` to find a slug, then list that folder.
+The parent path is fixed, so it is found (or made), never searched for by content:
 
-Search without `parent_id` covers the person's whole Drive. Use it only to find the workspace folder; never read documents you find that way except the ones the person points at.
+1. `google_drive__list_files` with `parent_id: root`, `mime_type: application/vnd.google-apps.folder`, `file_name_contains: AI`. Names match as substrings (so this can also return unrelated folders such as "Google AI Studio"): keep only a result named exactly `AI`. None: `google_drive__create_folder(folder_name: "AI")`.
+2. The same inside it for `JobSearch` (`parent_id: <AI folder id>`): find the exact match or create it.
+3. List `JobSearch` (`parent_id: <JobSearch folder id>`, `mime_type: application/vnd.google-apps.folder`): these are the people who already have a workspace here. Zero: this is a new person, follow `references/onboarding.md`. One: that is the workspace; note its id and name. Several: list the names and ask which one is them, or whether to make a new one.
+4. List the workspace folder with `parent_id: <its id>`; add `file_name_contains` for one document (`profile`, `facts - `; remember `facts` also matches `facts - shared`). Ids are stable: keep them for the rest of the task instead of searching again. The `jobs` folder holds one folder per posting; list `jobs` to find a slug, then list that folder.
 
-If the folder was shared with the person rather than owned by them, reading works and writing needs the owner's permission. Say so instead of retrying.
+Never search the person's whole Drive (no `parent_id`) to find any of this: the fixed path means you never need to.
+
+If the workspace folder was shared with the person rather than owned by them, reading works and writing needs the owner's permission. Say so instead of retrying.
 
 ## Read
 

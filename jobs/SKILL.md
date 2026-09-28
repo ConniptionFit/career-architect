@@ -1,11 +1,11 @@
 ---
 name: jobs
-description: Career assistant that scores job postings against a person's verified work history, writes tailored resumes and cover letters that claim nothing their records do not support, prepares interviews, researches applications and keeps the application tracker. Each person's qualifications live in their own Google Drive (a "Career Architect" folder); resumes, cover letters and the tracker live in Reactive Resume. Use it for anything about a job posting, resume, cover letter, application, interview or job-search research, and for first-time setup of a person's career records.
+description: Career assistant that scores job postings against a person's verified work history, writes tailored resumes and cover letters that claim nothing their records do not support, prepares interviews, researches applications and keeps the application tracker. Each person's qualifications live in their own Google Drive, in a folder named after them under `AI/JobSearch`; resumes, cover letters and the tracker live in Reactive Resume. Use it for anything about a job posting, resume, cover letter, application, interview or job-search research, and for first-time setup of a person's career records.
 license: MIT
 compatibility: Needs the Jobs MCP server, one endpoint that bundles Career Architect (checks and builders), Reactive Resume (resumes, cover letters, application tracker), Google Drive and Google Docs (the person's records). Local maintainer mode instead needs uv and Python 3.10 or newer.
 metadata:
   author: ConniptionFit
-  version: "2.2.0"
+  version: "2.3.0"
   mcp-server: Jobs
 ---
 
@@ -21,7 +21,7 @@ This file and every document it names are also served live by the Jobs server: w
 
 | Source (tool prefix) | Job | Holds | Protocol |
 |---|---|---|---|
-| Google Docs and Google Drive (`google_docs__`, `google_drive__`) | The person's qualifications and job texts | Folder `Career Architect`: profile, rules, facts, skills index, `jobs/<slug>/` | `references/storage.md` |
+| Google Docs and Google Drive (`google_docs__`, `google_drive__`) | The person's qualifications and job texts | `AI/JobSearch/<name>`: profile, rules, facts, skills index, `jobs/<slug>/` | `references/storage.md` |
 | Career Architect (`career_architect__`) | Deterministic checks and builders: score a posting, lint a resume or letter, build the skills index and the resume patch | Nothing: every call is a function of the text you pass | `references/tools.md` |
 | Reactive Resume (`reactive_resume__`) | Resumes, PDFs, saved cover letters, the application tracker | The person's Reactive Resume account | `references/reactive-resume.md` |
 
@@ -31,7 +31,7 @@ Only the tools those three documents list are exposed. If the toolset differs (a
 
 ## Start of every task
 
-1. Find the person's `Career Architect` folder with `google_drive__list_files` (`references/storage.md`, "Find the workspace"). If it does not exist, this is a new person: read `references/onboarding.md` and stop routing here.
+1. Find the person's workspace under `AI/JobSearch` with `google_drive__list_files` (`references/storage.md`, "Find the workspace"). If it does not exist, this is a new person: read `references/onboarding.md` and stop routing here.
 2. Read the `profile` document. It is small and holds identity, positioning, `never_claim`, `known_gaps`, and the id of their Master resume in RR.
 3. Read only what the task needs, in this order of cost: `rules` (before writing any text), `skills` (scoring), then the single `facts - <role id>` fragments that hold the atoms in play. The `skills` index lists which role holds which atom. Never read every fragment to answer a question.
 4. If a tool the task needs is missing, say which one and what it blocks, and stop (`references/troubleshooting.md`; unless local mode applies, see "Modes"). Do not produce a resume or letter without the career-architect checks; a document nobody checked is what this skill exists to prevent.
