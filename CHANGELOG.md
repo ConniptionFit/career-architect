@@ -4,6 +4,8 @@
 
 - **The skill is served by the connector.** New tool `career_architect__guide` returns the skill's own documents (`start` is `SKILL.md`; `workflows/score`, `references/storage` and the rest by path) from the server image. A client that has the Jobs connector therefore always reads the current instructions, whether or not it has, or has updated, a copy of the skill. Deploying the server (or applying the vMCP spec) is what publishes a change; nothing has to reach each person's machine. The vMCP description and the tool description tell the assistant to call it first. 38 tools in total.
 - **`connect/` replaces `.claude-plugin/`.** People install one plugin, a ten-line launcher skill plus the Jobs connector (`connect/make.sh` builds it for your address). The earlier plugin that shipped the full skill is gone: a copy of the skill is what goes stale, and two ways to install `jobs` invited using both.
+- **One-command deploy and tagged releases.** `deploy/update.sh [ref]` fetches, rebuilds and waits for the container to be healthy; give it a tag to roll back. Releases are tagged (`v2.2.0`).
+- The connect plugin's README no longer shows installers the maintainer's notes (`make.sh` drops the section below the `template-only` marker).
 - The container image now carries `jobs/SKILL.md`, `workflows/`, `references/`, `style/` and `assets/` (no scripts, no personal data).
 
 ## 2.1.0, server 1.1.0 (2026-09-28)

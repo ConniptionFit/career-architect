@@ -91,7 +91,7 @@ Known Obot vMCP problems (community `latest`, 2026-09) to keep in mind when you 
    - Skills, Access Policies: the same users, skill = `jobs` (pick the skill itself, not the repository entry, so a skill added to the repository later is not shared automatically).
 3. Narrow any wildcard policy that grants *All Obot Users* (Obot ships an `Everything` policy for servers and for skills). Add the administrator by name to it first, then remove *All Obot Users*, then save. Do it in that order so the administrator never loses access.
 
-**In the Claude apps (claude.ai, Cowork, Claude Code).** These do not read Obot's skill list. What they need is the connector plus a launcher skill, and `connect/` makes both one install (the plugin). The skill's instructions are not copied to anyone: the connector serves them (`career_architect__guide`), so what people use is whatever the server currently holds. Make the plugin once with `connect/make.sh` and publish it as its own repository (`docs/EXTENDING.md`, "The connect plugin"); people add that repository as a marketplace and install `jobs`. Nothing about it needs to change when the instructions, workflows, tools or descriptions change.
+**In the Claude apps (claude.ai, Cowork, Claude Code).** These do not read Obot's skill list. What they need is the connector plus a launcher skill, and `connect/` makes both one install (the plugin). The skill's instructions are not copied to anyone: the connector serves them (`career_architect__guide`), so what people use is whatever the server currently holds. Make the plugin once with `connect/make.sh` and publish it as its own repository (`docs/EXTENDING.md`, "The connect plugin"); people add that repository as a marketplace and install `jobs`. Nothing about it needs to change when the instructions, workflows, tools or descriptions change. The maintainer's copy is [ConniptionFit/career-architect-connect](https://github.com/ConniptionFit/career-architect-connect); it holds that deployment's connector address, so it is only useful to people the maintainer has invited.
 
 ## 6. Sign-in and default access
 
@@ -117,9 +117,9 @@ Remove them from both `Career Architect users` policies, the Jobs vMCP profile a
 
 ```
 cd <compose-dir>/career-architect-mcp
-git -C src pull --ff-only && docker compose --env-file <env-file> up -d --build
+bash src/deploy/update.sh            # the latest main
 ```
-Then re-check the tool preview in Obot (and, after a change to the server's tools, regenerate the entry's tool previews). The skill's documents are part of the image, so a change to `jobs/` reaches people when you run this; Obot's own skill source syncs from the repository by itself, hourly.
+The script fetches, rebuilds, waits for the container to be healthy and reminds you of the Obot step. (By hand it is `git -C src pull --ff-only && docker compose --env-file <env-file> up -d --build`; the script also refuses to run over local changes in `src/`.) Then re-check the tool preview in Obot (and, after a change to the server's tools, regenerate the entry's tool previews). The skill's documents are part of the image, so a change to `jobs/` reaches people when you run this; Obot's own skill source syncs from the repository by itself, hourly.
 
 | What changed | How it reaches people | By itself? |
 |---|---|---|
@@ -132,6 +132,13 @@ Then re-check the tool preview in Obot (and, after a change to the server's tool
 Versions: leave `version` out of the connect plugin's manifests so a change to it is delivered as a new commit. If you set one, raise it on every release or nobody receives the change.
 
 The instructions and the tool list are published in two places (the server image, the vMCP), so a release has an order: to add a tool, apply the spec first, then deploy the instructions that use it; to remove one, deploy the instructions first. The tests tie the two together in the repository, so a commit that breaks the pairing does not pass CI.
+
+**Releases and rollback.** Each release is a git tag (`v2.2.0`, matching `CHANGELOG.md`). To go back to one, run the script with the tag, then put that tag's tool list in Obot; run it with no argument to return to the latest:
+
+```
+bash src/deploy/update.sh v2.2.0
+```
+Then paste that tag's `deploy/jobs-vmcp.json` as `window.JOBS_SPEC` and run `deploy/apply-jobs-vmcp.js` (rolling back usually removes tools, so deploy first and apply after). A change that was only wrong in the instructions rolls back with the deploy alone.
 
 **Refreshing pins** (monthly, or when a security advisory lands):
 - Dependencies: from `mcp-server/`, `uv pip compile requirements.in --python-version 3.12 --python-platform linux --generate-hashes -o requirements.lock`, review the diff, run the tests (`README.md`), rebuild.

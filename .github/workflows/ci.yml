@@ -18,3 +18,5 @@ jobs:
         run: |
           python3 -c "import json; [json.load(open(p)) for p in ('deploy/jobs-vmcp.json', 'connect/.mcp.json', 'connect/.claude-plugin/plugin.json', 'connect/.claude-plugin/marketplace.json')]"
           node --check deploy/apply-jobs-vmcp.js
+          bash -n deploy/update.sh
+          bash -n connect/make.sh

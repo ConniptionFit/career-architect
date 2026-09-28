@@ -76,10 +76,11 @@ What can still differ per person: whether the assistant calls `guide` first. The
 
 1. Change `deploy/jobs-vmcp.json` and the skill in the same commit; tests and `agentskills validate` pass.
 2. `CHANGELOG.md`: what changed and whether anything must be done by hand.
-3. If `mcp-server/` changed, or anything under `jobs/` (the instructions ship in the image): bump `SERVER_VERSION` when the server changed; push; on the host `git -C src pull --ff-only && docker compose --env-file <env-file> up -d --build`; check `docker compose logs` is quiet.
+3. If `mcp-server/` changed, or anything under `jobs/` (the instructions ship in the image): bump `SERVER_VERSION` when the server changed; push; on the host `bash src/deploy/update.sh` (fetches, rebuilds, waits for healthy); check `docker compose logs` is quiet.
 4. If the tool list or descriptions changed: run `deploy/apply-jobs-vmcp.js`; open the Inspector; check the count. Order: to add a tool, apply first and deploy after; to remove one, deploy first and apply after.
 5. Sync the skill source in Obot (or wait for the hourly sync).
 6. Start a new conversation in a client with the connector and run one real task: score a posting.
+7. Tag it: `git tag -a vX.Y.Z -m "<the CHANGELOG title>" && git push origin vX.Y.Z`. The tag is the rollback point (`docs/OPERATIONS.md`, section 7).
 
 ## Things to know about Obot
 
