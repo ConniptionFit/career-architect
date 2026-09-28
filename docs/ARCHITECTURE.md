@@ -11,7 +11,7 @@ A small trusted group each keep their own career history in a place they own, an
 | **Jobs vMCP** `deploy/jobs-vmcp.json` | Obot (a virtual MCP server) | Nothing: it bundles the four servers below behind one endpoint, one tool allowlist and one set of descriptions | Only signed-in, named people reach it; every call runs as that person |
 | **career-architect MCP server** `mcp-server/` | One container beside Obot | Nothing (stateless) | Trusts only Obot (shared secret, Host allowlist) |
 | **Reactive Resume** (RR) | The administrator's instance | Resumes, saved cover letters, application tracker, per person | Each person signs in with their own account (OAuth through Obot) |
-| **Google Drive** and **Google Docs** | Obot's catalog servers, on the person's own Google account | `Career Architect/` folder: profile, rules, facts, skills index, job texts | Each person connects their own Google account; nothing here reaches the career-architect server except as request text |
+| **Google Drive** and **Google Docs** | Obot's catalog servers, **hosted by Obot the company** (`google-drive-mcp.obot.ai`, `google-docs-mcp.obot.ai`) | `Career Architect/` folder in the person's own Drive: profile, rules, facts, skills index, job texts | Each person connects their own Google account (scopes `drive` and `documents`); their token lives with Obot's service, and their documents pass through it. Nothing here reaches the career-architect server except as request text |
 
 The skill and the Jobs vMCP are two halves of one thing. The skill says what to do and which tools to use; the vMCP decides which tools exist. `tests/test_deploy_spec.py` fails when they disagree.
 
@@ -40,7 +40,7 @@ Google Docs holding plain text, one folder per person: `profile`, `rules`, `skil
 | Shared secret between Obot and the server | Per-user tokens | The server holds no per-user data; Obot authenticates users and decides who may reach it |
 | RR authenticated per person (OAuth through Obot) | One shared API key | Every RR write is attributable and confined to that person's data |
 | One Jobs vMCP bundling four servers, with an allowlist of tools | Give each person four separate servers | One endpoint to connect and one place that decides which tools exist. The allowlist enforces `SKILL.md` rules 11 and 13 in the gateway (no delete, share, bulk or import tools exist) instead of trusting the model |
-| Google Drive and Docs servers from Obot's catalog | Own storage tools in `mcp-server/` | Nothing to build or secure, and each person's own Google OAuth. Cost: no write-whole-document tool, hence the versioned write. A future storage server can replace them behind the same skill protocol |
+| Google Drive and Docs servers from Obot's catalog | Own storage tools in `mcp-server/`, or the same servers self-hosted | Nothing to build or secure, no Google Cloud project to run, and each person's own Google OAuth. Cost: a third party (Obot's hosted service) is in the path of every document, Obot plans to swap these entries for Google's official servers (tool names would change), and no write-whole-document tool, hence the versioned write. A future storage server can replace them behind the same skill protocol |
 | The skill limits which RR tools the client may call | Trust the model | Rules 13 and 14 in `SKILL.md`, and the same list enforced by the vMCP |
 | Hash-pinned dependency lock and digest-pinned base image | Floating versions | Reproducible, reviewable builds; refresh procedure in `OPERATIONS.md` |
 

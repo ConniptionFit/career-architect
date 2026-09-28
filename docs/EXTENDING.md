@@ -90,5 +90,6 @@ Add the marketplace: claude.ai, *Customize, Plugins, Add, Add marketplace*; Clau
 ## Things to know about Obot
 
 - The tool list and descriptions of a vMCP are live. The skill in Obot is a Git sync, hourly.
+- The Google Drive and Docs entries come from Obot's catalog, which follows Obot's releases. Obot says it will move them to Google's official MCP servers; when that happens tool names and behaviour change. The apply script disables any tool it does not know, so a swap fails closed (the skill would report missing tools) instead of exposing something new. Re-read `jobs/references/storage.md` against the new tools before re-enabling.
 - `deploy/apply-jobs-vmcp.js` uses Obot's own UI API (`/api/vmcps`), which is not a documented, stable API. If a future Obot changes it, use the UI: the spec says what to enable and what to write.
 - Open issues that touch vMCPs are listed in `docs/OPERATIONS.md`, section 4. Check them before a large edit.
