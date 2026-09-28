@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "jobs" / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import career  # noqa: E402
-from drive_sim import drive_render as _drive_render  # noqa: E402
+from drive_sim import docs_render as _docs_render, drive_render as _drive_render  # noqa: E402
 
 FIXTURES = ROOT / "tests" / "fixtures" / "data"
 TODAY = dt.date(2026, 9, 20)
@@ -100,6 +100,39 @@ class DriveText(unittest.TestCase):
     def test_clean_text_is_left_alone(self):
         for text in ("a: 1\n\nb: 2\n", "tags: [a, b]\nsay: \"x\"\n", "a\n\nb\n\nc\n\nd\n"):
             self.assertEqual(career.normalize_drive_text(text), text, text)
+
+    def test_paragraphs_separated_by_blank_lines_are_not_mistaken_for_doubled_text(self):
+        # No trailing newline and no escapes: the shape of doubled text but none of the connector's marks. Reading it as doubled
+        # would delete every blank line of an ordinary prose document, so it is left alone.
+        for text in ("a\n\nb\n\nc", "# Wording rules\n\nYears: 12+.\n\nVoice: no first person"):
+            self.assertEqual(career.normalize_drive_text(text), text, text)
+
+    def test_docs_output_is_cleaned_without_being_told(self):
+        text = (FIXTURES / "facts.md").read_text()
+        got = career.normalize_drive_text(_docs_render(text))
+        self.assertEqual(got, text.rstrip())
+        self.assertEqual(career.parse_block(got), career.parse_block(text))
+
+    def test_docs_section_break_is_removed_from_a_document_that_opens_with_front_matter(self):
+        profile = (FIXTURES / "profile.md").read_text()
+        self.assertTrue(profile.startswith("---\n"))
+        read = _docs_render(profile)
+        self.assertTrue(read.startswith("\n---\n---\n"))                        # the converter's break, then the front matter's own
+        for source in ("auto", "docs"):
+            got = career.normalize_drive_text(read, source)
+            self.assertEqual(career.parse_front(got), career.parse_front(profile), source)
+        # a client that dropped the leading newline while copying the text gives the same result
+        self.assertEqual(career.parse_front(career.normalize_drive_text(read.lstrip("\n"))), career.parse_front(profile))
+
+    def test_docs_source_removes_exactly_the_section_break(self):
+        self.assertEqual(career.normalize_drive_text("\n---\n# Rules\n\nBe brief.", "docs"), "# Rules\n\nBe brief.")
+        self.assertEqual(career.normalize_drive_text("---\n# Rules", "docs"), "# Rules")
+        self.assertEqual(career.normalize_drive_text("\n---\n", "docs"), "")
+        self.assertEqual(career.normalize_drive_text("# Rules\n\n---\n\nmore", "docs"), "# Rules\n\n---\n\nmore")   # a rule later on is content
+
+    def test_docs_output_of_a_prose_document_keeps_its_blank_lines(self):
+        text = "# Wording rules\n\nYears: 12+ in IT.\n\nVoice: no first person"
+        self.assertEqual(career.normalize_drive_text(_docs_render(text)), text)
 
     def test_ordinary_words_that_look_like_base64_are_not_decoded(self):
         self.assertEqual(career.normalize_drive_text("Hello world this is a test of the thing"), "Hello world this is a test of the thing")

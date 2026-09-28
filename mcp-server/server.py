@@ -3,6 +3,7 @@
 Stateless by design. Every tool is a pure function of the text it is given: nothing is written to disk, nothing is kept
 between calls, and request bodies are never logged (they hold a person's work history). The user's documents live in
 their own Google Drive; the agent reads them there and passes text in. See docs/ARCHITECTURE.md.
+In the deployment this is one component of a virtual MCP server named Jobs, next to Reactive Resume, Google Drive and Google Docs.
 
 Run:  python server.py            (listens on $MCP_HOST:$MCP_PORT, default 0.0.0.0:8080, path /mcp)
 Env:  CAREER_MCP_TOKEN            shared secret; when set every request except /healthz must send it as
@@ -44,7 +45,7 @@ from pydantic import Field  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 from starlette.responses import JSONResponse  # noqa: E402
 
-SERVER_VERSION = "1.0.0"
+SERVER_VERSION = "1.1.0"
 log = logging.getLogger("career-mcp")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "WARNING").upper()
 if LOG_LEVEL not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
@@ -154,12 +155,13 @@ server = MCPServer(
     instructions=(
         "Deterministic checks for the `jobs` skill: score a job posting against a skills index, lint a tailored resume or cover letter "
         "against the person's recorded facts, and build the Reactive Resume patch. Stateless: pass the text of the person's documents "
-        "(exactly as read from Drive) in every call; nothing is stored. Documents that quote 'atoms' must come from the person's facts."
+        "(as read from Google Docs, unchanged) in every call; nothing is stored. Run these checks instead of judging by hand: a resume or "
+        "letter that skipped them has not been checked against the person's facts."
     ),
     log_level=LOG_LEVEL,        # the SDK configures logging itself at construction and defaults to INFO, which logs tool error messages
 )
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
-Doc = Annotated[str, Field(description="Document text exactly as returned by Google Drive (read_file_content or download_file_content); escaped or base64 text is cleaned automatically.")]
+Doc = Annotated[str, Field(description="Document text exactly as read from the person's Google Doc (`markdown_content` of the Google Docs get_document tool), copied unchanged. It is cleaned automatically; text from other Drive readers (escaped, doubled or base64) also works.")]
 
 
 def guarded(fn):
@@ -181,15 +183,15 @@ def guarded(fn):
 @server.tool(title="Server info", annotations=READ_ONLY)
 @guarded
 def info() -> dict[str, Any]:
-    """Server version, limits and the date it uses for 'present'. Use it as a health check."""
+    """Health check: the server version, its limits and the date it uses for 'present'. Call it first when a task begins or when another tool of this server fails."""
     return {"name": "career-architect", "version": SERVER_VERSION, "today": dt.datetime.now(dt.timezone.utc).date().isoformat(),
             "limits": {"document_chars": MAX_DOC, "documents": MAX_DOCS, "total_chars": MAX_TOTAL}, "stateless": True}
 
 
 @server.tool(title="Clean text read from Drive", annotations=READ_ONLY)
 @guarded
-def normalize_text(text: Doc, source: Annotated[str, Field(description="auto (default), drive_read, base64 or plain")] = "auto") -> dict[str, Any]:
-    """Undo what the Drive connector does to a Google Doc holding plain text (escaped punctuation, a blank line after every line, base64)."""
+def normalize_text(text: Doc, source: Annotated[str, Field(description="docs (text from Google Docs get_document), auto (default: recognises each source by its marks), drive_read, base64 or plain")] = "auto") -> dict[str, Any]:
+    """Get clean, editable text from a document you read: removes the section-break line Google Docs puts first and undoes the escaping, doubled blank lines or base64 of other Drive readers. Use it before you edit a document's text yourself; the other tools clean their document arguments on their own."""
     if not isinstance(text, str) or len(text) > MAX_DOC:
         raise ToolError(f"text must be at most {MAX_DOC:,} characters")
     try:
@@ -204,8 +206,9 @@ def build_index(
     facts_docs: Annotated[list[str], Field(description="Every facts fragment: the shared one (aliases, credentials, education) and one per role. All of them, so years and tags are complete.")],
     today: Annotated[str | None, Field(description="YYYY-MM-DD; only for tests")] = None,
 ) -> dict[str, Any]:
-    """Validate the person's facts and generate skills.md: each skill's years (union of role spans), last use, depth, evidence atoms, aliases,
-    unconfirmed atoms and the career length. Save the returned `skills_md` to Drive; scoring and linting need only that."""
+    """Use after any change to the person's facts, and to validate them before saving. Validates every facts fragment together and generates the `skills` index: each skill's years
+    (union of role spans), last use, depth, evidence atoms, aliases, unconfirmed atoms, which role holds which atom, and the career length. Save the returned `skills_md` as the `skills`
+    document; scoring and linting need only that. Returns errors instead when the facts are invalid: fix them before saving anything."""
     docs = _docs("facts_docs", facts_docs)
     facts = _facts("facts_docs", docs)
     when = _today(today)
@@ -224,8 +227,8 @@ def match(
     profile_md: Doc,
     requirements: Annotated[str, Field(description="tag[:must|nice[:min_years]],... e.g. okta:must:5,terraform:nice. Use the tag names in skills_md; aliases resolve.")],
 ) -> dict[str, Any]:
-    """Coverage table and the score ceiling for a list of posting requirements, from the skills index and the profile's never_claim / known_gaps.
-    The final score is the ceiling or one point below with a stated reason, never above."""
+    """Use to score how well a job posting fits the person, before any resume or letter. Coverage table and score ceiling for a list of the posting's requirements, from the skills index
+    and the profile's never_claim / known_gaps. The final score is the ceiling or one point below with a stated reason, never above. Lists requirements the person has not been asked about (`ask`)."""
     parsed = _index(_text("skills_md", skills_md))
     profile = _profile(_text("profile_md", profile_md))
     reqs = _text("requirements", requirements)
@@ -246,8 +249,8 @@ def lint_resume(
     facts_docs: Annotated[list[str], Field(description="The facts fragments that hold the roles and atoms the selection cites, plus the shared fragment. Not the whole career.")],
     today: Annotated[str | None, Field(description="YYYY-MM-DD; only for tests")] = None,
 ) -> dict[str, Any]:
-    """Check a resume selection: every bullet traces to a usable atom, no invented numbers or scope, never_claim respected, skills exist in the index,
-    years match the computed career, plus style warnings. Returns the issues and the plain-text resume for a read-through."""
+    """Use to check a tailored resume selection before it is written anywhere: every bullet traces to a usable atom, no invented numbers or scope, never_claim respected, skills exist in the
+    index, years match the computed career, plus style warnings. Returns the issues and the plain-text resume for a read-through. Fix every error (E) before continuing."""
     parsed = _index(_text("skills_md", skills_md))
     profile = _profile(_text("profile_md", profile_md))
     facts = _facts("facts_docs", _docs("facts_docs", facts_docs))
@@ -278,8 +281,8 @@ def lint_cover(
     posting_text: Annotated[str, Field(description="The job posting text, so statements about the company can be checked.")] = "",
     today: Annotated[str | None, Field(description="YYYY-MM-DD; only for tests")] = None,
 ) -> dict[str, Any]:
-    """Check a cover letter: claims about the person cite atoms, statements about the company come from the posting, no invented figures, voice rules.
-    Returns the issues, the plain text, and the HTML for Reactive Resume's saved Cover Letters (recipient block and body)."""
+    """Use to check a cover letter before it is saved: claims about the person cite atoms, statements about the company come from the posting, no invented figures, voice rules.
+    Returns the issues, the plain text, and the HTML (`content_html`, `recipient_html`, `name`) to save as a Reactive Resume cover letter."""
     parsed = _index(_text("skills_md", skills_md))
     profile = _profile(_text("profile_md", profile_md))
     facts = _facts("facts_docs", _docs("facts_docs", facts_docs))
@@ -329,8 +332,9 @@ def resume_patch(
     master_json: Annotated[str, Field(description="Optional: JSON of the Master resume (or just data.sections.experience/skills first items and data.summary) so item fields match the instance exactly. Omit to use Reactive Resume 5.x defaults.")] = "",
     today: Annotated[str | None, Field(description="YYYY-MM-DD; only for tests")] = None,
 ) -> dict[str, Any]:
-    """Lint the selection and, only when it has no errors, return the JSON Patch operations that fill a duplicate of the person's Master resume
-    (summary, experience, skills, header, education, certifications). Apply them with Reactive Resume's apply_resume_patch. The document name is returned too."""
+    """Use to turn a checked resume selection into the edit to make in Reactive Resume. Lints the selection and, only when it has no errors, returns the JSON Patch `operations` that fill a duplicate
+    of the person's Master resume (summary, experience, skills, header, education, certifications), plus `resume_name` (at most 64 characters) and `resume_slug` for the duplicate. Apply the operations
+    unchanged with Reactive Resume's apply_resume_patch."""
     linted = lint_resume(selection_yaml, skills_md, profile_md, facts_docs, today)
     if not linted["ok"]:
         return {"ok": False, "errors": linted["errors"], "issues": linted["issues"], "operations": []}
@@ -376,8 +380,8 @@ def _fetch_json(url: str) -> Any:
 @server.tool(title="Read a public job posting", annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True))
 @guarded
 def posting(url: Annotated[str, Field(description="A public Ashby, Greenhouse or Lever posting URL.")]) -> dict[str, Any]:
-    """Pay range, reports-to line, posting date and description from the ATS's public API (which shows pay ranges the rendered page hides).
-    `pay` is empty when the posting states none. Contacts only the ATS API hosts."""
+    """Use when the person gives an Ashby, Greenhouse or Lever posting link: reads pay range, reports-to line, posting date and description from the ATS's public API (which shows pay ranges the
+    rendered page hides). `pay` is empty when the posting states none. Contacts only those ATS API hosts; other sites must be pasted or fetched some other way."""
     if len(url) > 500 or not url.lower().startswith(("https://", "http://")):
         raise ToolError("url must be an http(s) address of a posting")
     err = io.StringIO()

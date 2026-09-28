@@ -1,0 +1,144 @@
+{
+  "$comment": "Source of truth for the Jobs virtual MCP server (Obot vMCP). The skill in jobs/ documents exactly the enabled tools; tests/test_deploy_spec.py fails when the two drift. docs/OPERATIONS.md, 'Jobs vMCP', says how to apply it.",
+  "name": "Jobs",
+  "description": "Jobs: the toolset behind the `jobs` (Career Architect) skill, for anything about a job posting, resume, cover letter, application, interview or the person's career records. Tools are prefixed by source. career_architect__* are deterministic checks that score a posting against the person's verified facts and lint and build resumes, letters and the skills index: run them instead of judging by hand. google_docs__* and google_drive__* read and write the person's records, kept as Google Docs in a folder named `Career Architect` in their own Drive (profile, rules, facts, skills index, jobs/<slug>). reactive_resume__* read and write their resumes, saved cover letters and application tracker in Reactive Resume. Every call acts as the signed-in person. Deleting, sharing, bulk edits, imports, locking and Reactive Resume's own AI features are deliberately not exposed. Start with the `jobs` skill; it holds the workflow and rules.",
+  "sources": [
+    {
+      "component": "Career Architect",
+      "prefix": "career_architect",
+      "origin": "mcp-server/server.py (own descriptions)",
+      "enabled": [
+        "info",
+        "normalize_text",
+        "build_index",
+        "match",
+        "lint_resume",
+        "lint_cover",
+        "resume_patch",
+        "posting"
+      ],
+      "disabled": [],
+      "descriptions": {}
+    },
+    {
+      "component": "Reactive Resume",
+      "prefix": "reactive_resume",
+      "origin": "Reactive Resume 5.x MCP endpoint, per-user OAuth",
+      "enabled": [
+        "list_resumes",
+        "list_resume_tags",
+        "read_resume",
+        "download_resume_pdf",
+        "duplicate_resume",
+        "apply_resume_patch",
+        "update_resume",
+        "list_cover_letters",
+        "read_cover_letter",
+        "create_cover_letter",
+        "update_cover_letter",
+        "duplicate_cover_letter",
+        "export_cover_letter",
+        "list_applications",
+        "read_application",
+        "list_application_tags",
+        "get_application_stats",
+        "create_application",
+        "update_application",
+        "add_application_note"
+      ],
+      "disabled": [
+        "create_resume",
+        "import_resume",
+        "delete_resume",
+        "lock_resume",
+        "unlock_resume",
+        "get_resume_statistics",
+        "refresh_cover_letter_style",
+        "delete_cover_letter",
+        "copy_embedded_cover_letter",
+        "import_cover_letter",
+        "update_application_timeline_entry",
+        "delete_application_timeline_entry",
+        "delete_application",
+        "bulk_update_applications",
+        "bulk_delete_applications",
+        "import_applications",
+        "attach_application_document",
+        "remove_application_document",
+        "autofill_application_from_job",
+        "score_application_match",
+        "tailor_resume_for_application",
+        "draft_application_message"
+      ],
+      "append_to_description": {
+        "list_resumes": " Jobs skill: the person's Master resume is the one whose id is `rr_master` in their `profile` document.",
+        "duplicate_resume": " Jobs skill: only duplicate the Master for a posting. name is `resume_name` and slug is `resume_slug` from career_architect__resume_patch (name at most 64 characters); tags [\"tailored\"].",
+        "apply_resume_patch": " Jobs skill: pass operations exactly as career_architect__resume_patch returned them, and only to the tailored copy just created, never to the Master unless the person asked.",
+        "create_cover_letter": " Jobs skill: content and recipient come from career_architect__lint_cover (content_html, recipient_html, name); set resumeId and, when a tracker row exists, applicationId.",
+        "update_cover_letter": " Jobs skill: read_cover_letter first and pass its revision as expectedRevision; never overwrite edits the person made in Reactive Resume.",
+        "list_applications": " Jobs skill: returns whole records and is very large; filter by tags (the company slug) or status before listing everything.",
+        "create_application": " Jobs skill: one row per position. Look for an existing row first (list_applications with tags [company slug]); tag new rows with the company slug; status saved.",
+        "update_application": " Jobs skill: read_application first and send merged lists; one row per position."
+      }
+    },
+    {
+      "component": "Google Drive",
+      "prefix": "google_drive",
+      "origin": "Obot catalog: Google Drive",
+      "enabled": [
+        "list_files",
+        "get_file",
+        "create_folder",
+        "update_file",
+        "read_file"
+      ],
+      "disabled": [
+        "copy_file",
+        "delete_file",
+        "transfer_ownership",
+        "list_permissions",
+        "get_permission",
+        "create_permission",
+        "update_permission",
+        "delete_permission",
+        "list_shared_drives",
+        "create_shared_drive",
+        "delete_shared_drive",
+        "rename_shared_drive"
+      ],
+      "descriptions": {
+        "list_files": "Find files and folders in the person's Google Drive. In the Jobs workflow: find the folder named `Career Architect` (mime_type application/vnd.google-apps.folder, file_name_contains \"Career Architect\") and list its contents with parent_id. mime_type application/vnd.google-apps.document selects Google Docs. Names match as substrings, so \"facts\" also finds \"facts - shared\". Returns id, name, mimeType, parents, modifiedTime; up to 50 results by default (raise max_results for large folders).",
+        "get_file": "Get the metadata of one Drive file or folder (name, mimeType, parents, modified time, owner). It does not return content: read a Google Doc with google_docs__get_document.",
+        "create_folder": "Create a folder in the person's Google Drive (the Career Architect workspace, its `jobs` and `_history` folders, one folder per job). Drive allows duplicate names, so list_files first to be sure it does not already exist.",
+        "update_file": "Rename a Drive file or folder and/or move it to another folder (new_parent_id; the file leaves its old folder, `root` means My Drive). Use it to move a newly created Google Doc into the right Career Architect folder and to archive a replaced version into `_history`. It cannot change content.",
+        "read_file": "Read an uploaded file (PDF, Word, text) as markdown, for example an existing resume the person wants imported. Do NOT use it for Google Docs in the Career Architect workspace: it exports them as a PDF and garbles the text. Use google_docs__get_document for those."
+      }
+    },
+    {
+      "component": "Google Docs",
+      "prefix": "google_docs",
+      "origin": "Obot catalog: Google Docs",
+      "enabled": [
+        "get_document",
+        "create_document",
+        "replace_text",
+        "append_text"
+      ],
+      "disabled": [
+        "list_documents",
+        "insert_text",
+        "delete_content",
+        "format_text",
+        "set_paragraph_style",
+        "insert_table",
+        "batch_update_document"
+      ],
+      "descriptions": {
+        "get_document": "Read a Google Doc as markdown. Returns title, markdown_content and revision_id. Use it for every document in the Career Architect workspace (profile, rules, skills, facts - <role id>, jobs/<slug>/...). Pass markdown_content unchanged to the career_architect__ tools; they clean it (Docs adds a leading section-break line).",
+        "create_document": "Create a Google Doc with a title and plain-text initial_content. It is created in the root of My Drive, so immediately move it into the right Career Architect folder with google_drive__update_file (new_parent_id). Write the text exactly as it should be read back; YAML and markdown stay literal.",
+        "replace_text": "Replace every occurrence of find_text in a Google Doc (Google keeps the old version in the doc's version history). Use it for a one-line correction only after the text you just read shows find_text occurs exactly once (include surrounding words) and the person confirmed the change. For anything larger, create a new document instead.",
+        "append_text": "Append text to the end of a Google Doc, for example a new line in a log. It cannot rewrite or remove existing text."
+      }
+    }
+  ]
+}

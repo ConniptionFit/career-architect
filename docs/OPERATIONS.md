@@ -47,6 +47,8 @@ Then, in Obot (step 2), open the server's tool preview: you should see `info`, `
 
 **First real connection.** Connect from a client (an Obot-connected Claude) and call `info`. Then run `docker logs career-architect-mcp`: it should be empty. A line `unauthorized request to /mcp: token header missing` means Obot did not send the static header (re-check the item above); `present but wrong` means the value differs from the server's token.
 
+**Google Drive and Google Docs** (Obot's catalog: add both, they are not custom servers). They use Google's OAuth: each person connects their own Google account, so nothing of theirs is stored by you beyond Obot's per-user token. If Drive already works for you, Docs asks for one more consent. Both are needed: Drive finds and organises files, Docs reads and writes their contents (Drive's own `read_file` exports a Doc to PDF and garbles it, and it has no write-content tool).
+
 **Reactive Resume** (Remote server):
 - URL `https://resume.example.com/mcp`, no static header. Reactive Resume publishes OAuth metadata and supports dynamic client registration, so Obot discovers it and each person authorises with their own account (callback `https://obot.example.com/oauth/mcp/callback`). Name it `Reactive Resume`.
 - Each person authorises once (the Authenticate button on the server) and the tool preview then lists Reactive Resume's tools.
@@ -66,15 +68,32 @@ The provider's redirect URI is `https://resume.example.com/api/auth/callback/cus
 - Gate the application in the identity provider with a group (for example "Reactive Resume Users") so only invited people can reach it.
 - Keep a backup of `.env` before each change and recreate the container (`docker compose up -d`) to apply it.
 
-## 4. Publish the skill in Obot
+## 4. The Jobs vMCP
+
+The skill talks to one endpoint, the **Jobs** virtual MCP server (Obot: vMCPs). It bundles the four servers above, exposes an allowlist of their tools with descriptions written for an agent, and gives every person one thing to connect. The definition is in [`deploy/jobs-vmcp.json`](../deploy/jobs-vmcp.json); `tests/test_deploy_spec.py` keeps it in step with the skill.
+
+1. vMCPs, Create: name `Jobs`, description as in the spec. Add the four components, named exactly `Career Architect`, `Reactive Resume`, `Google Drive`, `Google Docs`: **the component name becomes the tool prefix** (`google_drive__list_files`), and the skill relies on those prefixes. Connect each component (Google and Reactive Resume ask you to sign in).
+2. Apply the spec. Either in the UI (each component: enable only the tools listed as `enabled` in the spec, and paste the descriptions), or with the script `deploy/apply-jobs-vmcp.js`: open your Obot in a browser as an administrator, open the developer console, paste the script (read it first) and press Enter. It prints what it changed; running it again changes nothing. It disables any tool the spec does not mention, so a tool added by a server update never appears without a decision.
+3. Check: the vMCP's Inspector tab lists exactly the enabled tools (37 at the time of writing: 8 Career Architect, 20 Reactive Resume, 5 Google Drive, 4 Google Docs). Call `career_architect__info`.
+4. Who may connect: the vMCP's Profiles tab. The `default` profile lists the people (or groups) allowed; add each invited person there as well as in the access policies (section 5).
+
+What the allowlist keeps out, and why: deleting, sharing, ownership and shared-drive tools on Drive; every `delete_*`, `bulk_*`, `import_*`, lock and attachment tool and Reactive Resume's own AI features (`tailor_resume_for_application` and the rest, which write text that never passed the atoms check); Docs' raw `batch_update_document`, `delete_content` and formatting tools. The skill's rules 11 and 13 say the same, but the gateway is where it is enforced.
+
+Known Obot vMCP problems (community `latest`, 2026-09) to keep in mind when you edit: a profile that refines tools can leave the default profile with no tools after a server update; disabling a tool a profile references is refused; tool lists can go stale after a server changes (open the Inspector after every change). Keep one profile.
+
+## 5. Publish the skill
+
+**In Obot.**
 
 1. Skills, Sources, *Add Source URL*: name `career-architect`, URL `https://github.com/ConniptionFit/career-architect`, reference `main`, no credential (the repository is public). Obot syncs sources hourly and immediately on adding; a new commit needs a manual sync or the next hourly run. The `jobs` skill should appear as valid.
 2. **Who can use it is decided by access policies, not by sign-in.** Create one named-user policy in each place, both called `Career Architect users`:
-   - MCP Servers, Access Policies: users = the people allowed, servers = `Career Architect` and `Reactive Resume` (pick the two servers, never *Everything in Global Registry*).
+   - MCP Servers, Access Policies: users = the people allowed, servers = `Career Architect`, `Reactive Resume`, `Google Drive` and `Google Docs` (pick the four servers, never *Everything in Global Registry*).
    - Skills, Access Policies: the same users, skill = `jobs` (pick the skill itself, not the repository entry, so a skill added to the repository later is not shared automatically).
 3. Narrow any wildcard policy that grants *All Obot Users* (Obot ships an `Everything` policy for servers and for skills). Add the administrator by name to it first, then remove *All Obot Users*, then save. Do it in that order so the administrator never loses access.
 
-## 5. Sign-in and default access
+**In the Claude apps (claude.ai, Cowork, Claude Code).** These do not read Obot's skill list; they get skills and connectors from a *plugin marketplace*, a Git repository. This repository is one (`.claude-plugin/marketplace.json`, plugin `jobs`). It carries the skill only, because the connector's address is specific to your Obot. To bundle the skill with your Jobs vMCP, so that installing one plugin brings both, publish a small marketplace of your own that names this repository as the skill source and adds the connector, as in `docs/EXTENDING.md`, "A plugin that bundles the skill and your Jobs vMCP". Updates then follow section 7.
+
+## 6. Sign-in and default access
 
 Obot's Google provider can restrict sign-in only by email domain, not by individual address (set *Allowed E-Mail Domains* to your organisation's domain if you have one). With personal `gmail.com` accounts anyone with a Google account can sign in, so the safety comes from authorization: **a person who is not named in a policy sees no servers and no skills.** Keep the *Default User Role* (Identity & Access, Roles) at *Standard User*, the lowest role, and keep no policy that grants *All Obot Users*. Chat needs a model provider; while none is configured a Standard User has nothing to chat with.
 
@@ -85,16 +104,16 @@ If you need a true sign-in whitelist (only accounts you create can sign in), Obo
 ### Onboard a person
 
 1. Give them the Obot address. They sign in once with their Google account; that creates their user with no access.
-2. Add them by name to both `Career Architect users` policies (MCP Servers and Skills).
+2. Add them by name to both `Career Architect users` policies (MCP Servers and Skills), and to the Jobs vMCP's profile (section 4).
 3. Identity: create their account in your identity provider and add them to the Reactive Resume group. If sign-ups are disabled in Reactive Resume (`FLAG_DISABLE_SIGNUPS` also blocks single-sign-on sign-ups), lift it while they sign in once or create the account another way.
-4. They connect Google Drive in their client and authorise Reactive Resume in Obot (each person authorises their own account).
+4. They open the Jobs vMCP in Obot (or connect it from their client) and sign in to each component with their own accounts: Google (Drive and Docs) and Reactive Resume.
 5. First conversation: they run the `jobs` skill, which finds no `Career Architect` folder and runs onboarding (`jobs/references/onboarding.md`). They should create or choose a Master resume in Reactive Resume first (its template and design carry over to every tailored resume).
 
 ### Someone leaves
 
-Remove them from both `Career Architect users` policies and the identity group; delete their Reactive Resume account. Their Drive is theirs.
+Remove them from both `Career Architect users` policies, the Jobs vMCP profile and the identity group; delete their Reactive Resume account. Their Drive is theirs.
 
-## 6. Update
+## 7. Update, and what reaches clients by itself
 
 ```
 cd <compose-dir>/career-architect-mcp
@@ -102,12 +121,23 @@ git -C src pull --ff-only && docker compose --env-file <env-file> up -d --build
 ```
 Then re-check the tool preview in Obot. Skill changes need no deploy: push to the repository and sync the source.
 
+| What changed | How it reaches people | By itself? |
+|---|---|---|
+| Which tools the Jobs vMCP exposes, and their descriptions | The vMCP is live on Obot. A client reads the tool list when it connects, so a **new conversation** sees the change | Yes. Nothing to sync. A running conversation keeps the list it started with |
+| career-architect server code | Rebuild the container (above); the vMCP serves it immediately | No: deploy by hand, then check the Inspector |
+| The skill, for clients that read it from Obot | Obot re-syncs a Git source **hourly**; *Sync* on the source forces it. Obot's docs describe no update for a copy a client already installed (`obot setup`, an agent's installed skill): reinstall those | Hourly in Obot; not in installed copies |
+| The skill, in claude.ai, Cowork and Claude Code | Through a plugin marketplace. On claude.ai: Customize, Plugins, Add marketplace (GitHub URL); turn on *Sync automatically* for a marketplace you added from github.com, or use *Check for updates*. Team/Enterprise: Organization settings, Plugins & skills, sync from GitHub (webhook on every push to the default branch), availability *Installed by default*. Claude Code: `/plugin`, Marketplaces, *Enable auto-update* (off by default), or `autoUpdate: true` in managed settings | Yes once auto-sync or auto-update is on |
+
+Versions: leave `version` out of the plugin manifest and marketplace entry so every commit is an update. If you set one, raise it on every release or nobody receives the change.
+
+An auto-updated skill and an old tool list can disagree for the length of one conversation. That is why the tests tie the two together and why a release changes both in one commit: `deploy/jobs-vmcp.json` first, applied, then the skill.
+
 **Refreshing pins** (monthly, or when a security advisory lands):
 - Dependencies: from `mcp-server/`, `uv pip compile requirements.in --python-version 3.12 --python-platform linux --generate-hashes -o requirements.lock`, review the diff, run the tests (`README.md`), rebuild.
 - Base image digest in the `Dockerfile`: `docker buildx imagetools inspect python:3.12-slim-bookworm` and copy the `sha256` digest of the index; rebuild and test.
 - Obot itself is kept on `latest` on this deployment; re-run the verification after Obot upgrades.
 
-## 7. Rotate the token
+## 8. Rotate the token
 
 Write a new token to the env file you use (see step 1), recreate the container with the same `--env-file`, then update the header value on the Obot entry (Configuration tab) and regenerate the tool preview.
 
@@ -117,7 +147,7 @@ cd <compose-dir>/career-architect-mcp
 docker compose --env-file <env-file> up -d
 ``` Do this whenever someone who knew the token leaves, or the `.env` was exposed.
 
-## 8. Monitoring and troubleshooting
+## 9. Monitoring and troubleshooting
 - Health: `/healthz` (unauthenticated, returns the version only). The container healthcheck uses it; the `autoheal` label restarts an unhealthy one where that helper runs.
 - Logs are quiet by design (WARNING). A tool crash logs the tool name and exception type; a rejected request logs its path and whether a token header was present, never the token; user text is never logged. `LOG_LEVEL` (default `WARNING`) is read at start, and INFO logs tool error messages, which can quote a document's parser errors, so leave it at WARNING outside debugging.
 - User-facing symptoms and fixes: `jobs/references/troubleshooting.md`.

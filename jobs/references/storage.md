@@ -1,8 +1,22 @@
 # Storage protocol: the person's Google Drive
 
-The person's records are Google Docs holding plain text, in one folder they own. The Drive connector is the only way they are read or written. The career-architect server never sees Drive; you read a document and pass its text to a tool.
+The person's records are Google Docs holding plain text, in one folder they own. They are read and written through the Jobs toolset's Google Docs and Google Drive tools, which act as the signed-in person. The career-architect tools never see Drive; you read a document and pass its text to them.
 
-Connector tools used: `search_files`, `read_file_content`, `create_file`, `update_file` (title and parent only), `get_file_metadata`. Nothing else. Never call `trash_file`, `share_file` or anything that changes permissions (SKILL.md rule 11).
+Tools used (full names as the Jobs toolset lists them; a client may put its own prefix in front):
+
+| Tool | For |
+|---|---|
+| `google_drive__list_files` | find the workspace folder; list a folder (`parent_id`) with each document's id and `modifiedTime` |
+| `google_drive__get_file` | one file's metadata, to check `modifiedTime` before a write |
+| `google_drive__create_folder` | create the workspace folders (onboarding, a new job) |
+| `google_drive__update_file` | move a document into its folder; rename and move a superseded one to `_history` |
+| `google_docs__get_document` | read a document: `title`, `markdown_content`, `revision_id` |
+| `google_docs__create_document` | create a document with a `title` and plain-text `initial_content` |
+| `google_docs__replace_text` | change one line of a document in place |
+| `google_docs__append_text` | add text at the end of a document |
+| `google_drive__read_file` | only to read a file the person uploaded (an old resume, PDF or Word) when they ask you to import it |
+
+Nothing else exists in the toolset, and you do not look for another way: no deleting, sharing or permission changes (SKILL.md rule 11).
 
 ## Layout
 
@@ -23,39 +37,59 @@ Career Architect/                 folder, marker of the workspace; lives anywher
 
 Why one document per role: a whole career runs to tens of kilobytes, and a resume needs two or three roles. The `skills` index carries what scoring and linting need (years, depth, evidence atom ids, aliases, credentials, career length) plus a `# Roles` table saying which role holds which atom, so a task opens only the fragments it cites.
 
-Every document is a Google Doc created from `text/plain`. Titles are exact and case-sensitive.
+Every document is a Google Doc holding plain text. Titles are exact and case-sensitive.
 
 ## Find the workspace
 
-1. `search_files` with `query: title = 'Career Architect' and mimeType = 'application/vnd.google-apps.folder'` and `excludeContentSnippets: true`.
-2. One result: that is the workspace. Note its id. Several: list them with their owner and last-modified time and ask which one. None: onboarding (`references/onboarding.md`).
-3. List a folder's contents with `parentId = '<folder id>'` (add `and title = 'profile'` for a single document). A folder id is stable; remember it for the rest of the task instead of searching again.
+1. `google_drive__list_files` with `mime_type: application/vnd.google-apps.folder` and `file_name_contains: Career Architect`. Names match as substrings, so keep only results named exactly `Career Architect`.
+2. One folder: that is the workspace; note its id. Several: list them with their `modifiedTime` and ask which one. None: onboarding (`references/onboarding.md`).
+3. List a folder with `parent_id: <folder id>`; add `file_name_contains` for one document (`profile`, `facts - `; remember `facts` also matches `facts - shared`). Ids are stable: keep them for the rest of the task instead of searching again. The `jobs` folder holds one folder per posting; list `jobs` to find a slug, then list that folder.
+
+Search without `parent_id` covers the person's whole Drive. Use it only to find the workspace folder; never read documents you find that way except the ones the person points at.
 
 If the folder was shared with the person rather than owned by them, reading works and writing needs the owner's permission. Say so instead of retrying.
 
 ## Read
 
-`read_file_content(fileId)` returns the document as markdown text: punctuation is backslash-escaped and every line is followed by a blank line. Two consequences:
+`google_docs__get_document(document_id)` returns `markdown_content`: the document text as written, with no escaping, except that Google Docs puts a `---` line first (a section break). The career-architect tools remove it. So:
 
-- **Pass documents to the career-architect tools as they came.** The server cleans them (`normalize_text` is applied to every document argument). Do not tidy them yourself first; a "tidy" copy is where a fact gets changed.
-- **When you are going to edit a document,** call `normalize_text` on it first and edit the clean text it returns. Never edit the escaped text.
+- **Pass `markdown_content` to the career-architect tools exactly as it came.** Do not tidy it first; a "tidy" copy is where a fact gets changed.
+- **When you are going to edit a document's text yourself,** call `normalize_text` with `source: docs` on it first, edit the clean text it returns, and write that.
+- Never read a workspace document with `google_drive__read_file`. Drive exports a Google Doc to PDF for that tool and the text comes back wrapped and garbled.
 
 Copy documents into tool arguments verbatim. Do not summarise, reorder or drop lines; the checks are only as good as the text they get. If a check says an atom or role is missing, first suspect that you passed the wrong or a truncated fragment.
 
-Note each document's `modifiedTime` (from `search_files` or `get_file_metadata`) when you read it. You need it to detect a concurrent edit before you write.
+Note each document's `modifiedTime` (from `list_files`) when you read it. You need it to detect a concurrent edit before you write.
 
-## Write: versioned, never in place
+## Write
 
-The connector cannot change a document's content (`update_file` changes the title or parent only), so a write is "create the new version, then retire the old one". Nothing is deleted, and at no moment is there no current document.
+Two kinds of write, chosen by size. Both start with the same first two steps.
 
 1. **Validate first.** A facts change is checked before it is saved: run `build_index` on the complete new set of fragments and continue only when `ok` is true. A selection or letter is saved after `lint_resume` / `lint_cover` shows no errors, or explicitly marked as a draft in its title (`selection (draft)`).
-2. **Check for a concurrent edit.** `get_file_metadata` on the current document. If its `modifiedTime` is later than the one you noted when you read it, someone (or another session) changed it: re-read it, merge, and show the person what differs before saving.
-3. **Create the new version:** `create_file` with `title` (the exact document title), `parentId`, `textContent`, `contentMimeType: text/plain`. Send clean text, never text you got from `read_file_content` without `normalize_text`.
-4. **Retire the old version:** `update_file(fileId: <old id>, title: "<title> (superseded YYYY-MM-DD HHMM)", parentId: <_history folder id>)`. One call sets both the title and the folder; if the move is refused, rename only.
-5. **Regenerate the index** after any facts change: `build_index` over all fragments, then write the returned `skills_md` as `skills` with steps 2 to 4. The index is a cache; a stale one makes scores wrong, so do this in the same task as the facts change.
-6. Tell the person, in one line, what was saved and where.
+2. **Check for a concurrent edit.** `google_drive__get_file` on the current document. If its `modifiedTime` is later than the one you noted when you read it, someone (or another session) changed it: re-read it, merge, and show the person what differs before saving.
 
-If step 3 succeeded and step 4 failed, two documents share a title. Rule for readers: use the one with the latest `modifiedTime`; finish the rename when you notice, and mention it.
+### A new version (a whole document, or any change of more than a line)
+
+Nothing is deleted, and at no moment is there no current document.
+
+3. `google_docs__create_document` with the exact `title` and the clean text as `initial_content`. Never send text you read without `normalize_text` if you edited it.
+4. The new document is created in the root of My Drive. Move it now: `google_drive__update_file(file_id: <new id>, new_parent_id: <the folder>)`.
+5. Retire the old version: `google_drive__update_file(file_id: <old id>, new_name: "<title> (superseded YYYY-MM-DD HHMM)", new_parent_id: <_history folder id>)`. One call renames and moves.
+6. Regenerate the index after any facts change (below).
+
+If step 3 succeeded and step 4 or 5 failed, two documents share a title, or one sits in the wrong folder. Readers use the one in the workspace folder with the latest `modifiedTime`; finish the move or rename when you notice, and mention it.
+
+### One line (a corrected wording, a number, a tag)
+
+3. Confirm from the text you read that the exact line occurs once in the document (count it), and show the person the old and new line.
+4. `google_docs__replace_text(document_id, find_text, replace_text)` with `find_text` a single line's worth of text (no line breaks) that occurs once. Google keeps the earlier version in the document's version history. Read the document again and check the change landed where intended.
+5. Regenerate the index after any facts change.
+
+Never use `replace_text` to rewrite several lines or to add or remove an atom: that is a new version.
+
+### The index
+
+After any facts change, run `build_index` over all fragments and write the returned `skills_md` as `skills` with a new version. The index is a cache; a stale one makes scores wrong, so do this in the same task as the facts change. Tell the person, in one line, what was saved and where.
 
 Sending less: a change to one atom rewrites one role's fragment, not the whole career. Keep fragments to about one role each; split a role only if it passes about 25 atoms.
 
@@ -67,7 +101,7 @@ Sending less: a change to one atom rewrites one role's fragment, not the whole c
 - `jd`: the posting text, plus its URL and date on the first two lines.
 - `selection`, `cover`: the YAML documents the workflows describe.
 
-Drive's connector coerces content that looks like a spreadsheet formula or a date when it is stored in a Sheet. That is why nothing here is a Sheet.
+Write documents as plain paragraphs: no bold, headings, bullets or tables applied in Docs. `get_document` turns those into markdown marks (`**`, `#`, `-`) and a YAML fragment must read back exactly as it was written. A person who opens a document to look is welcome; if they format one, tell them it will read back with extra marks.
 
 ## Limits the server enforces
 

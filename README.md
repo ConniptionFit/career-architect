@@ -5,13 +5,21 @@ A job-search assistant for a small trusted group, built to run on an [Obot](http
 The rule that shapes everything: **no atom, no claim.** Every bullet in a resume or letter traces to something the person confirmed, so nothing they would have to defend in an interview was made up along the way.
 
 ```
-                 the person's client (Claude, via Obot)
-                   |                |                 |
-        Google Drive connector   career-architect   Reactive Resume MCP
-        (their own account)      MCP server         (their own account, OAuth)
-                   |             (stateless, this   |
-        Career Architect/        repository)        resumes, cover letters,
-        profile, facts, skills                      application tracker
+      the person's client (Claude, through Obot or a Claude plugin)
+                               |
+                Jobs vMCP: one endpoint, one tool allowlist
+                               |
+   +---------------+-----------+---------+------------------+
+   |               |                     |                  |
+Google Docs   Google Drive       career-architect    Reactive Resume
+(their own    (their own         (stateless, this    (their own account,
+ account)      account)           repository)         OAuth)
+   |               |                     |                  |
+   +-------+-------+                     |                  |
+           |                             |                  |
+  Career Architect/ folder       checks and builders   resumes, cover
+  profile, rules, facts,                               letters, tracker
+  skills index, job texts
 ```
 
 ## What is in the repository
@@ -21,15 +29,18 @@ The rule that shapes everything: **no atom, no claim.** Every bullet in a resume
 | `jobs/` | The skill (Agent Skills standard: `SKILL.md`, `workflows/`, `references/`, `assets/`, `style/`). This is what Obot syncs. |
 | `jobs/scripts/career.py` | The deterministic core, also a command-line tool for local mode. |
 | `mcp-server/` | The hosted MCP server (`server.py`), its hash-pinned dependency lock, `Dockerfile` and `compose.example.yaml`. |
+| `deploy/` | The Jobs vMCP definition (`jobs-vmcp.json`: which tools exist and how they are described) and a script that applies it to Obot. |
+| `.claude-plugin/` | Plugin and marketplace manifests, so Claude apps can install and auto-update the skill. |
 | `tests/` | Offline tests: `uv run --python 3.12 --with "mcp==2.2.0" --with pyyaml python -m unittest discover -s tests` |
-| `docs/` | Architecture, operations runbook, security and privacy notes. |
+| `docs/` | Architecture, operations runbook, security and privacy notes, and [how to extend it](docs/EXTENDING.md). |
 | `setup.sh` | Installer for local mode (one person, files on their machine). |
 
 ## Deploying for a group
 
 1. Run the MCP server next to Obot (`mcp-server/compose.example.yaml`).
-2. Register it and Reactive Resume as MCP servers in Obot; add this repository as a Skill source; grant the group access.
-3. Onboard each person: an account, access, and a first conversation that creates their `Career Architect` Drive folder.
+2. Register it, Reactive Resume, Google Drive and Google Docs as MCP servers in Obot, and bundle them as one **Jobs** vMCP with the tool allowlist in `deploy/jobs-vmcp.json`.
+3. Add this repository as a Skill source in Obot (and, for the Claude apps, as a plugin marketplace); grant the group access.
+4. Onboard each person: an account, access, and a first conversation that creates their `Career Architect` Drive folder.
 
 The runbook, with every value to enter, is [docs/OPERATIONS.md](docs/OPERATIONS.md). Design and decisions are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); what is stored, where, and what is protected is in [docs/SECURITY.md](docs/SECURITY.md).
 

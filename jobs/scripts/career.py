@@ -103,25 +103,39 @@ def read_front(path: Path) -> dict:
 
 # ---------------------------------------------------------------- documents stored in Google Drive
 
-# `read_file_content` backslash-escapes markdown punctuation: \[ \] \_ \> \~ \# \* \- \. \\ ...
+# Where the text comes from decides what was done to it, so `source` names the reader:
+#   docs        `get_document` of the Google Docs server: markdown converted from the document body. Nothing is escaped, but the
+#               body always opens with a section break, which the converter renders as a leading "---" line.
+#   drive_read  a Drive connector that converts a Doc itself (Claude's own `read_file_content`): every line followed by a blank
+#               line, a blank line as two spaces, markdown punctuation backslash-escaped.
+#   base64      a Drive export, base64 encoded, with a byte order mark and CRLF line ends.
+#   plain       already clean.
+# `auto` recognises each by its own marks and otherwise leaves the text alone: guessing wrong would change the person's facts.
 _MD_ESCAPED = re.compile(r"\\([\\`*_{}\[\]()#+\-.!>~|<])")
+_DOCS_BREAK = re.compile(r"[ \t]*---[ \t]*(?:\n|\Z)")
 
 
 def _looks_doubled(t: str) -> bool:
+    """The shape of `drive_read` output. The shape alone (a blank line after every line) also describes ordinary prose whose
+    paragraphs are separated by blank lines, so it counts only with one of the connector's own marks: a blank original line
+    written as two spaces, or backslash-escaped punctuation."""
     lines = t.replace("\r\n", "\n").split("\n")
-    return len(lines) >= 3 and len(lines) % 2 == 1 and all(x == "" for x in lines[1::2]) and any(x.strip() for x in lines[0::2])
+    if not (len(lines) >= 3 and len(lines) % 2 == 1 and all(x == "" for x in lines[1::2]) and any(x.strip() for x in lines[0::2])):
+        return False
+    return any(x == "  " for x in lines[0::2]) or bool(_MD_ESCAPED.search(t))
+
+
+def _drop_docs_break(t: str) -> str:
+    """Remove the section-break line the Docs converter puts first (the text may also have lost its leading newline)."""
+    m = _DOCS_BREAK.match(t.lstrip("\n"))
+    return t.lstrip("\n")[m.end():] if m else t
 
 
 def normalize_drive_text(text: str, source: str = "auto") -> str:
-    """Restore the original text of a document that was stored in Google Drive as a Google Doc.
-
-    The Drive connector hands a Doc back in one of two shapes:
-    * `read_file_content` (source 'drive_read'): prose in which every original line is followed by a blank line, a blank
-      original line is a line of two spaces, and markdown punctuation is backslash-escaped. Both changes are reversible.
-    * `download_file_content` (source 'base64'): the exact text, base64 encoded, with a byte order mark and CRLF line ends.
-    'plain' leaves the text alone; 'auto' picks by shape and falls back to plain."""
-    if source not in ("auto", "drive_read", "base64", "plain"):
-        raise ValueError("source must be auto, drive_read, base64 or plain")
+    """Restore the original text of a document that was stored in Google Drive as a Google Doc, whichever way it was read
+    (see the table above). 'auto' picks by each shape's own marks and falls back to plain."""
+    if source not in ("auto", "docs", "drive_read", "base64", "plain"):
+        raise ValueError("source must be auto, docs, drive_read, base64 or plain")
     t = text
 
     def decode(s: str) -> str:
@@ -129,7 +143,9 @@ def normalize_drive_text(text: str, source: str = "auto") -> str:
 
     if source == "auto":
         squashed = "".join(t.split())
-        if len(squashed) >= 16 and len(squashed) % 4 == 0 and re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", squashed):
+        if t.startswith(("\n---\n", "---\n---\n")):
+            source = "docs"                 # a section break followed by the document's own text (which may open with `---`)
+        elif len(squashed) >= 16 and len(squashed) % 4 == 0 and re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", squashed):
             try:
                 t, source = decode(t), "plain"
             except (ValueError, UnicodeDecodeError):
@@ -141,8 +157,10 @@ def normalize_drive_text(text: str, source: str = "auto") -> str:
             t, source = decode(t), "plain"
         except (ValueError, UnicodeDecodeError) as e:
             raise ValueError(f"not valid base64 text: {e}")
-    t = t.lstrip("﻿").replace("\r\n", "\n").replace("\r", "\n")
-    if source == "drive_read":
+    t = t.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    if source == "docs":
+        t = _drop_docs_break(t)
+    elif source == "drive_read":
         t = "\n".join("" if piece == "  " else piece for piece in t.split("\n\n"))
         t = _MD_ESCAPED.sub(r"\1", t)
     return t

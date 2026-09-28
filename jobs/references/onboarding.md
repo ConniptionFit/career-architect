@@ -4,13 +4,15 @@ Use when the person has no `Career Architect` folder, or asks to set up their re
 
 ## 1. Confirm access before creating anything
 
-- Drive: call `search_files` with `excludeContentSnippets: true` once. If it fails, the person has not connected Drive: tell them to connect it in their client's connector settings and stop.
-- Reactive Resume: call `list_resumes`. If it fails, the person has not authorised Reactive Resume in their client (or the administrator has not given them access): say so and stop. Do not ask for an API key. Sign-in is through the account they use for the server.
-- career-architect: call `info`. It answers with the server version and limits.
+- Drive and Docs: call `google_drive__list_files` with `max_results: 1` once. If it fails with an authorisation error, the person has not connected their Google account to the Jobs server: tell them to open the Jobs server in their client (or Obot) and connect Google Drive and Google Docs, then stop.
+- Reactive Resume: call `reactive_resume__list_resumes`. If it fails, the person has not signed in to Reactive Resume through the Jobs server (or the administrator has not given them an account): say so and stop. Do not ask for an API key. Sign-in is through the account they use for the server.
+- career-architect: call `career_architect__info`. It answers with the server version and limits.
+
+If none of these tools exist, the person is not connected to the Jobs server at all: point them to the setup steps for their client and stop. Do not fall back to local mode unless they ask.
 
 ## 2. Create the workspace
 
-Ask one question first: **where in your Drive should the `Career Architect` folder go?** (Default: My Drive.) Then create, with `create_file` and `mimeType application/vnd.google-apps.folder`:
+Ask one question first: **where in your Drive should the `Career Architect` folder go?** (Default: My Drive.) Then create, with `google_drive__create_folder` (`parent_id` for the inner ones):
 
 `Career Architect`, and inside it `jobs` and `_history`.
 
@@ -22,11 +24,11 @@ Then create the documents from the templates in `assets/`, filled from the conve
 | `rules` | `assets/rules.md` | Leave the headings; fill as the person states preferences. |
 | `facts - shared` | `assets/facts-shared.md` | Credentials and education they give you. |
 
-Each is a Google Doc from `text/plain`. Do not put anything in Drive that is not in the layout in `references/storage.md`.
+Create each with `google_docs__create_document` and move it into the folder with `google_drive__update_file` (`references/storage.md`, "A new version", steps 3 and 4). Do not put anything in Drive that is not in the layout there.
 
 ## 3. Capture the history, one role at a time
 
-Follow `workflows/intake.md` ("Capturing an atom"). For each role, save one `facts - <role-id>` document from `assets/facts-role.md`. Ask the person to paste an existing resume or LinkedIn export if they have one: read it once, propose atoms in their words, and let them confirm each. Mark anything they did not confirm `unconfirmed`.
+Follow `workflows/intake.md` ("Capturing an atom"). For each role, save one `facts - <role-id>` document from `assets/facts-role.md`. Ask the person to paste an existing resume or LinkedIn export, or to point at one already in their Drive (`google_drive__read_file` reads an uploaded PDF or Word file): read it once, propose atoms in their words, and let them confirm each. Mark anything they did not confirm `unconfirmed`.
 
 After every role: run `build_index` on all fragments so far. If it returns errors, fix them before saving anything. Then save `skills` (`references/storage.md`, "Write").
 

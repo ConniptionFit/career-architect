@@ -1,6 +1,8 @@
 # Reactive Resume (RR): resumes, letters and the tracker
 
-RR's MCP server is the only place resumes, PDFs, saved cover letters and applications are created or changed. The person signs in to it through their own account, so every call acts as them. Tool names below are RR's; find them by suffix. Read a tool's own schema for exact field names before the first call of a kind, and never guess an id.
+RR's MCP server is the only place resumes, PDFs, saved cover letters and applications are created or changed. In the Jobs toolset its tools are `reactive_resume__<name>` (names below are the bare `<name>`). The person signs in to it through their own account, so every call acts as them. Read a tool's own schema for exact field names before the first call of a kind, and never guess an id.
+
+The Jobs toolset exposes only the tools this document uses (the reads and writes below). RR has more, such as deleting, importing, locking and its own AI features; if a client shows one, do not call it (SKILL.md rule 13). For anything outside this document the person uses Reactive Resume itself.
 
 RR's tools return whole records, and some are large (a master resume is about 22,000 characters; listing every application about 72,000). Ask for the smallest thing that answers the question, and prefer filtered lists.
 

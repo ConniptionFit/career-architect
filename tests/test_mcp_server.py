@@ -29,7 +29,7 @@ except ImportError:            # Python < 3.10 or the mcp package is not install
 
 import career  # noqa: E402
 import yaml  # noqa: E402
-from drive_sim import drive_render  # noqa: E402
+from drive_sim import docs_render, drive_render  # noqa: E402
 
 FIXTURES = ROOT / "tests" / "fixtures" / "data"
 FACTS = career.read_block(FIXTURES / "facts.md")
@@ -37,17 +37,18 @@ PROFILE = (FIXTURES / "profile.md").read_text()
 TODAY = "2026-09-20"
 
 
-def fragments() -> dict:
-    """The layout kept in Drive: one shared document and one per role, each stored as a Google Doc and read back through the connector."""
+def fragments(render=drive_render) -> dict:
+    """The layout kept in Drive: one shared document and one per role, each stored as a Google Doc and read back through `render`
+    (the Docs `get_document` tool or Claude's own Drive connector)."""
     shared = {k: FACTS[k] for k in ("aliases", "credentials", "education") if FACTS.get(k)}
     out = {"shared": yaml.safe_dump(shared, sort_keys=False, allow_unicode=True)}
     for role in FACTS["roles"]:
         out[role["id"]] = yaml.safe_dump({"roles": [role]}, sort_keys=False, allow_unicode=True)
-    return {k: drive_render(v) for k, v in out.items()}
+    return {k: render(v) for k, v in out.items()}
 
 
-def job(name: str, file: str) -> str:
-    return drive_render((FIXTURES / "jobs" / name / file).read_text())
+def job(name: str, file: str, render=drive_render) -> str:
+    return render((FIXTURES / "jobs" / name / file).read_text())
 
 
 @unittest.skipUnless(HAVE_MCP, "needs Python 3.10+ and the mcp package")
@@ -93,6 +94,24 @@ class Tools(unittest.IsolatedAsyncioTestCase):
         out = await self.ok("normalize_text", text=drive_render(text))
         self.assertEqual(out["text"], text)
         self.assertIn("base64", await self.fails("normalize_text", text="not base64 !!", source="base64"))
+
+    async def test_normalize_text_takes_google_docs_output(self):
+        out = await self.ok("normalize_text", text=docs_render(PROFILE), source="docs")
+        self.assertEqual(career.parse_front(out["text"]), career.parse_front(PROFILE))
+        self.assertEqual((await self.ok("normalize_text", text="\n---\n# Rules\n\nBe brief."))["text"], "# Rules\n\nBe brief.")
+
+    async def test_the_whole_flow_works_on_text_as_google_docs_returns_it(self):
+        """The deployed path: every document is read with `get_document` (a leading section break, nothing escaped) and passed on unchanged."""
+        docs = fragments(docs_render)
+        out = await self.ok("build_index", facts_docs=list(docs.values()), today=TODAY)
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(out["skills_md"], career.render_skills_md(FACTS, career.dt.date.fromisoformat(TODAY)))
+        skills_doc, profile_doc = docs_render(out["skills_md"]), docs_render(PROFILE)
+        scored = await self.ok("match", skills_md=skills_doc, profile_md=profile_doc, requirements="okta:must:3,terraform:must,sso:must")
+        self.assertEqual({r["requirement"]: r["status"] for r in scored["rows"]}, {"okta": "met", "terraform": "gap", "sso": "met"})
+        linted = await self.ok("lint_resume", selection_yaml=job("good", "selection.yml", docs_render), skills_md=skills_doc, profile_md=profile_doc,
+                               facts_docs=[docs["shared"], docs["northwind-se"], docs["contoso-helpdesk"]], today=TODAY)
+        self.assertTrue(linted["ok"], linted["issues"])
 
     async def test_index_built_from_drive_text_equals_the_one_built_from_the_files(self):
         got = await self.index()

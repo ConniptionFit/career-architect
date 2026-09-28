@@ -1,0 +1,20 @@
+name: ci
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Tests
+        run: uv run --python 3.12 --with "mcp==2.2.0" --with pyyaml python -m unittest discover -s tests
+      - name: Skill follows the Agent Skills standard
+        run: uvx --python 3.12 --from skills-ref agentskills validate jobs
+      - name: Manifests and scripts parse
+        run: |
+          python3 -c "import json; [json.load(open(p)) for p in ('deploy/jobs-vmcp.json', '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json')]"
+          node --check deploy/apply-jobs-vmcp.js

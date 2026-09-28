@@ -1,15 +1,15 @@
-# career-architect MCP server: tool reference
+# career-architect tools: reference
 
-Stateless. Every tool is a pure function of the text you give it: nothing is stored, nothing is read from Drive or Reactive Resume, and the person's documents are not logged. All of them except `posting` never leave the server. Tools return `ok`, `errors` and `warnings` counts and an `issues` list of `{level, where, message}` (`E` blocks, `W` is advice).
+The `career_architect__*` tools of the Jobs toolset (names below are the bare tool names). Stateless: every tool is a pure function of the text you give it. Nothing is stored, nothing is read from Drive or Reactive Resume, and the person's documents are not logged. All of them except `posting` never leave the server. Tools return `ok`, `errors` and `warnings` counts and an `issues` list of `{level, where, message}` (`E` blocks, `W` is advice).
 
-**Document arguments** (`text`, `skills_md`, `profile_md`, `selection_yaml`, `cover_yaml`, `facts_docs`, `master_json`) take the document exactly as Drive returned it; the server undoes the connector's escaping. Copy verbatim. Limits: 250,000 characters per document, 40 documents, 600,000 characters per call.
+**Document arguments** (`text`, `skills_md`, `profile_md`, `selection_yaml`, `cover_yaml`, `facts_docs`, `master_json`) take the document exactly as `google_docs__get_document` returned it (`markdown_content`); the server removes the section-break line Docs adds, and also undoes the escaping of other Drive readers. Copy verbatim. Limits: 250,000 characters per document, 40 documents, 600,000 characters per call.
 
 **Which facts fragments to send.** `build_index` needs all of them. `lint_resume`, `lint_cover` and `resume_patch` need only the fragments that hold the roles the selection cites, plus `facts - shared` (credentials and education are printed on the resume). Use the `# Roles` table in `skills` to pick them. Missing one shows up as "role ... is not in the facts you supplied" or an unknown atom id.
 
 | Tool | Use it to | Inputs | Returns |
 |---|---|---|---|
 | `info` | check the connection | none | version, limits, the date used for "present" |
-| `normalize_text` | get clean, editable text from a Drive read | `text`, optional `source` (`auto`, `drive_read`, `base64`, `plain`) | `text` |
+| `normalize_text` | get clean, editable text from a document you read, before you edit it yourself | `text`, optional `source` (`docs` for Google Docs, `auto`, `drive_read`, `base64`, `plain`) | `text` |
 | `build_index` | validate facts and generate the `skills` document | `facts_docs` (all fragments) | `ok`, `skills_md`, counts; or `errors` |
 | `match` | score a posting's requirements | `skills_md`, `profile_md`, `requirements` | `table`, `ceiling`, `ceiling_if_every_unasked_is_met`, `rows`, `ask` |
 | `lint_resume` | check a resume selection | `selection_yaml`, `skills_md`, `profile_md`, `facts_docs` | issues, `resume_text` |
