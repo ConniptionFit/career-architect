@@ -68,17 +68,31 @@ The provider's redirect URI is `https://resume.example.com/api/auth/callback/cus
 
 ## 4. Publish the skill in Obot
 
-1. Agent Management, Skills, Sources: add `https://github.com/ConniptionFit/career-architect` (an HTTPS Git URL; the skill directory is `jobs/`). Obot syncs sources hourly; sync manually after a push.
-2. Skill Access Policies: create a policy naming the `jobs` skill and the people or group allowed to use it (users have no access to skills by default).
-3. MCP access: grant the same people the `career-architect` and `Reactive Resume` servers.
+1. Skills, Sources, *Add Source URL*: name `career-architect`, URL `https://github.com/ConniptionFit/career-architect`, reference `main`, no credential (the repository is public). Obot syncs sources hourly and immediately on adding; a new commit needs a manual sync or the next hourly run. The `jobs` skill should appear as valid.
+2. **Who can use it is decided by access policies, not by sign-in.** Create one named-user policy in each place, both called `Career Architect users`:
+   - MCP Servers, Access Policies: users = the people allowed, servers = `Career Architect` and `Reactive Resume` (pick the two servers, never *Everything in Global Registry*).
+   - Skills, Access Policies: the same users, skill = `jobs` (pick the skill itself, not the repository entry, so a skill added to the repository later is not shared automatically).
+3. Narrow any wildcard policy that grants *All Obot Users* (Obot ships an `Everything` policy for servers and for skills). Add the administrator by name to it first, then remove *All Obot Users*, then save. Do it in that order so the administrator never loses access.
 
-## 5. Onboard a person
+## 5. Sign-in and default access
 
-1. Identity: create their account in your identity provider and add them to the Reactive Resume group.
-2. Obot: they need to sign in to Obot (it uses your configured provider) and be in the access policies of step 4.
-3. Reactive Resume: if sign-ups are disabled, see step 3. They sign in once with single sign-on; then they authorise the Reactive Resume server in Obot.
-4. Google: they connect their own Google Drive connector in their client. Nothing about Drive is configured on your side.
-5. First conversation: they run the `jobs` skill; it finds no `Career Architect` folder and runs onboarding (`jobs/references/onboarding.md`): it creates the folder in their Drive, captures their history, and points at their Master resume in Reactive Resume. They should create or choose a Master resume in Reactive Resume first (template and design carry over to every tailored resume).
+Obot's Google provider can restrict sign-in only by email domain, not by individual address (set *Allowed E-Mail Domains* to your organisation's domain if you have one). With personal `gmail.com` accounts anyone with a Google account can sign in, so the safety comes from authorization: **a person who is not named in a policy sees no servers and no skills.** Keep the *Default User Role* (Identity & Access, Roles) at *Standard User*, the lowest role, and keep no policy that grants *All Obot Users*. Chat needs a model provider; while none is configured a Standard User has nothing to chat with.
+
+Checks after any policy change: MCP Servers, Access Policies lists only named policies (plus the administrator's); the same for Skills. An unlisted user has no access.
+
+If you need a true sign-in whitelist (only accounts you create can sign in), Obot's *Local* provider does that, but switching provider signs everyone out and does not carry accounts, connected services or history over, so decide before you have data in Obot.
+
+### Onboard a person
+
+1. Give them the Obot address. They sign in once with their Google account; that creates their user with no access.
+2. Add them by name to both `Career Architect users` policies (MCP Servers and Skills).
+3. Identity: create their account in your identity provider and add them to the Reactive Resume group. If sign-ups are disabled in Reactive Resume (`FLAG_DISABLE_SIGNUPS` also blocks single-sign-on sign-ups), lift it while they sign in once or create the account another way.
+4. They connect Google Drive in their client and authorise Reactive Resume in Obot (each person authorises their own account).
+5. First conversation: they run the `jobs` skill, which finds no `Career Architect` folder and runs onboarding (`jobs/references/onboarding.md`). They should create or choose a Master resume in Reactive Resume first (its template and design carry over to every tailored resume).
+
+### Someone leaves
+
+Remove them from both `Career Architect users` policies and the identity group; delete their Reactive Resume account. Their Drive is theirs.
 
 ## 6. Update
 
@@ -103,11 +117,7 @@ cd <compose-dir>/career-architect-mcp
 docker compose --env-file <env-file> up -d
 ``` Do this whenever someone who knew the token leaves, or the `.env` was exposed.
 
-## 8. Someone leaves
-
-Remove them from the Obot access policies and the identity group; delete their Reactive Resume account. Their Google Drive is theirs.
-
-## 9. Monitoring and troubleshooting
+## 8. Monitoring and troubleshooting
 - Health: `/healthz` (unauthenticated, returns the version only). The container healthcheck uses it; the `autoheal` label restarts an unhealthy one where that helper runs.
 - Logs are quiet by design (WARNING). A tool crash logs the tool name and exception type; a rejected request logs its path and whether a token header was present, never the token; user text is never logged. `LOG_LEVEL` (default `WARNING`) is read at start, and INFO logs tool error messages, which can quote a document's parser errors, so leave it at WARNING outside debugging.
 - User-facing symptoms and fixes: `jobs/references/troubleshooting.md`.

@@ -33,6 +33,7 @@ A work history is personal data: employers, dates, accomplishments, contact deta
 ## Residual risks
 - **Prompt injection.** A malicious posting or shared document may try to steer the assistant. The rules and the server's read-only tools contain the damage, but they are instructions to a model. Restrict Reactive Resume's tools to the ones `jobs/references/reactive-resume.md` lists wherever your Obot version supports per-server tool filtering, and keep human approval on for write tools in the client.
 - **The model provider sees the documents** the assistant reads (that is inherent to using the assistant at all).
+- **Open sign-in.** Obot's Google provider limits sign-in by email domain only. With personal Google accounts anyone can create an Obot user, so access rests on Obot access policies: a user not named in a policy sees no servers and no skills, and the default role stays *Standard User*. Keep no policy that grants *All Obot Users* (`OPERATIONS.md`, section 5).
 - **Shared secret.** One token protects the server. Rotate it when anyone who knew it leaves (`OPERATIONS.md`).
 
 ## Leaving and deletion
