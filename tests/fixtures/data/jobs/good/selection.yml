@@ -1,0 +1,17 @@
+target: {company: Fabrikam, role: Systems Engineer}
+summary: "IT systems engineer with 8 years across help desk and identity work. Recent work centers on Okta automation and macOS fleet management."
+skills:
+  - {name: Identity, items: [Okta, Active Directory]}
+  - {name: Endpoint, items: [Jamf, Intune, macOS]}
+roles:
+  - id: northwind-se
+    bullets:
+      - {atom: nw-01, text: "Moved about 1,800 Macs from Kandji to Jamf without reimaging any of them."}
+      - {atom: nw-02, text: "Built Okta lifecycle automation that handles joiners, movers and leavers across 12 SaaS apps."}
+      - {atom: nw-03, text: "Cut new-hire laptop setup from two days to a few hours."}
+      - {atom: nw-05, text: "Scripted a reconciliation of Okta users against HR exports in Python."}
+  - id: contoso-helpdesk
+    title: "IT Support Engineer"
+    bullets:
+      - {atom: co-01, text: "Supported about 400 users across four offices on Windows and macOS."}
+      - {atom: co-02, text: "Built the first Intune enrollment for new laptops."}

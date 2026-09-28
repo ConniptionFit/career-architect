@@ -1,0 +1,11 @@
+target: {company: Fabrikam, role: Systems Engineer}
+recipient: ["Hiring Manager", "Fabrikam"]
+paragraphs:
+  - jd: true
+    text: "Fabrikam's plan to consolidate identity for its 400 engineers is the kind of project I would like to work on. The Systems Engineer role is the one I would like to apply for."
+  - atoms: [nw-02, nw-05]
+    text: "At Northwind I built Okta lifecycle automation for joiners, movers and leavers across 12 SaaS apps, and wrote a Python script to reconcile Okta users against HR exports."
+  - atoms: [nw-01]
+    text: "I also moved about 1,800 Macs from Kandji to Jamf with no reimaging, which is the part of the work I would bring to your endpoint side."
+  - jd: true
+    text: "I would welcome a conversation about the role."

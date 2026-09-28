@@ -1,0 +1,9 @@
+target: {company: Badco, role: Engineer}
+paragraphs:
+  - text: "I am writing to express my excitement — I would spearhead Kubernetes work for 900 engineers."
+  - atoms: [nw-01]
+    text: "Migrated 2,400 Macs and saved thousands of hours."
+  - atoms: [zz-9]
+    text: "Built things."
+  - atoms: [nw-06]
+    text: "Led the SOC 2 evidence collection."

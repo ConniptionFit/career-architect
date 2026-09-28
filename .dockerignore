@@ -1,0 +1,5 @@
+# The image is built from the repository root. Send Docker only what the image needs, never the rest of the working tree.
+*
+!mcp-server/server.py
+!mcp-server/requirements.lock
+!jobs/scripts/career.py

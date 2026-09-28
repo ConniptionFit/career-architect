@@ -1,0 +1,12 @@
+target: {company: Badco, role: Engineer}
+summary: "Results-driven engineer with 12 years of experience."
+skills:
+  - {name: Cloud, items: [Terraform, Okta]}
+roles:
+  - id: northwind-se
+    bullets:
+      - {atom: nw-01, text: "Spearheaded a migration of 2,400 Macs — with Kubernetes tooling."}
+      - {atom: nw-06, text: "Led the SOC 2 evidence collection."}
+      - {atom: nope-99, text: "Invented a bullet."}
+      - {text: "No atom at all."}
+      - {atom: co-01, text: "Wrong role for this atom."}

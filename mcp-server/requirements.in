@@ -1,0 +1,5 @@
+# Direct dependencies. requirements.lock pins every package (and its hash) that these pull in.
+# Regenerate:  uv pip compile requirements.in --python-version 3.12 --python-platform linux --generate-hashes -o requirements.lock
+mcp==2.2.0
+pyyaml>=6,<7
+uvicorn>=0.30
