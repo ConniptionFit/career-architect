@@ -1,5 +1,5 @@
 # career-architect MCP server.
-# Build from the repository root (the image needs jobs/scripts/career.py as well as this folder):
+# Build from the repository root (the image needs jobs/scripts/career.py and the skill's documents as well as this folder):
 #   docker build -f mcp-server/Dockerfile -t career-architect-mcp:local .
 #
 # The base image is pinned by digest so a build is reproducible. Refresh it (and requirements.lock) when
@@ -22,6 +22,12 @@ RUN pip install --require-hashes --no-deps -r requirements.lock
 
 COPY mcp-server/server.py ./server.py
 COPY jobs/scripts/career.py ./career.py
+# The skill's own documents, served by the `guide` tool so clients always read the current instructions (no scripts, no personal data).
+COPY jobs/SKILL.md ./jobs/SKILL.md
+COPY jobs/workflows ./jobs/workflows
+COPY jobs/references ./jobs/references
+COPY jobs/style ./jobs/style
+COPY jobs/assets ./jobs/assets
 
 USER 10001:10001
 EXPOSE 8080

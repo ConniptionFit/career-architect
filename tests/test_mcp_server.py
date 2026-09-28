@@ -7,6 +7,7 @@ import asyncio
 import http.client
 import json
 import logging
+import re
 import socket
 import sys
 import threading
@@ -77,13 +78,40 @@ class Tools(unittest.IsolatedAsyncioTestCase):
     async def test_tools_are_listed_with_read_only_annotations_and_schemas(self):
         async with Client(srv.server) as c:
             tools = {t.name: t for t in (await c.list_tools()).tools}
-        self.assertEqual(set(tools), {"info", "normalize_text", "build_index", "match", "lint_resume", "lint_cover", "resume_patch", "posting"})
+        self.assertEqual(set(tools), {"info", "guide", "normalize_text", "build_index", "match", "lint_resume", "lint_cover", "resume_patch", "posting"})
         self.assertTrue(all(t.annotations.read_only_hint and not t.annotations.destructive_hint for t in tools.values()))
         self.assertTrue(all(t.description for t in tools.values()))
         self.assertEqual(tools["match"].input_schema["required"], ["skills_md", "profile_md", "requirements"])
         self.assertEqual(tools["lint_resume"].input_schema["required"], ["selection_yaml", "skills_md", "profile_md", "facts_docs"])
         self.assertFalse(tools["info"].annotations.open_world_hint)
         self.assertTrue(tools["posting"].annotations.open_world_hint)                # the one tool that reaches the network
+
+    async def test_guide_serves_the_skill_itself(self):
+        skill = (ROOT / "jobs" / "SKILL.md").read_text()
+        body = skill.split("\n---\n", 1)[1].lstrip("\n")
+        out = await self.ok("guide")
+        self.assertEqual(out["topic"], "SKILL.md")
+        self.assertEqual(out["text"], body)                                       # front matter removed, nothing else changed
+        self.assertNotIn("name: jobs", out["text"])
+        self.assertEqual(out["skill_version"], career.parse_front(skill)["metadata"]["version"])
+        self.assertIn("workflows/score.md", out["topics"])
+        for topic in ("start", "", "SKILL.md", "skill"):
+            self.assertEqual((await self.ok("guide", topic=topic))["text"], body, topic)
+
+    async def test_guide_serves_every_document_the_skill_names(self):
+        named = set(re.findall(r"`((?:workflows|references|style|assets)/[a-z-]+\.md)`", (ROOT / "jobs" / "SKILL.md").read_text()))
+        self.assertGreaterEqual(len(named), 10)
+        for path in sorted(named):
+            for spelling in (path, path[:-3], "./jobs/" + path):
+                out = await self.ok("guide", topic=spelling)
+                self.assertEqual(out["text"], (ROOT / "jobs" / path).read_text(), spelling)
+
+    async def test_guide_only_reaches_the_bundled_documents(self):
+        for bad in ("../../etc/passwd", "/etc/passwd", "scripts/career.py", "..", "references/../SKILL.md/../../server.py", "nope", "references/"):
+            message = await self.fails("guide", topic=bad)
+            self.assertIn("Available:", message, bad)
+            self.assertNotIn("root:", message)
+            self.assertNotIn("def ", message)
 
     async def test_info_is_a_health_check(self):
         out = await self.ok("info")

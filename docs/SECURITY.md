@@ -27,7 +27,7 @@ A work history is personal data: employers, dates, accomplishments, contact deta
 - **Supply chain.** Every Python dependency is pinned by hash in `mcp-server/requirements.lock` and installed with `--require-hashes`; the base image is pinned by digest.
 
 ## Controls in the gateway (the Jobs vMCP)
-- **A tool allowlist.** The Jobs vMCP (`deploy/jobs-vmcp.json`) exposes 37 tools and no others: on Google Drive no delete, share, permission, ownership or shared-drive tools; on Reactive Resume no `delete_*`, `bulk_*`, `import_*`, lock or attachment tools and none of its AI features; on Google Docs no raw `batch_update_document` or range deletion. A manipulated assistant cannot call what does not exist.
+- **A tool allowlist.** The Jobs vMCP (`deploy/jobs-vmcp.json`) exposes 38 tools and no others: on Google Drive no delete, share, permission, ownership or shared-drive tools; on Reactive Resume no `delete_*`, `bulk_*`, `import_*`, lock or attachment tools and none of its AI features; on Google Docs no raw `batch_update_document` or range deletion. A manipulated assistant cannot call what does not exist.
 - **Named access.** Who can reach the vMCP is set by its profile and by named-user access policies. Someone who signs in but is not named sees nothing.
 - **Reviewed change.** `tests/test_deploy_spec.py` fails if the skill and the allowlist disagree or if a dangerous tool is enabled, and the apply script disables any tool a server update adds until someone decides.
 

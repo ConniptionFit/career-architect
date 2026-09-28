@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.2.0, server 1.2.0 (2026-09-28)
+
+- **The skill is served by the connector.** New tool `career_architect__guide` returns the skill's own documents (`start` is `SKILL.md`; `workflows/score`, `references/storage` and the rest by path) from the server image. A client that has the Jobs connector therefore always reads the current instructions, whether or not it has, or has updated, a copy of the skill. Deploying the server (or applying the vMCP spec) is what publishes a change; nothing has to reach each person's machine. The vMCP description and the tool description tell the assistant to call it first. 38 tools in total.
+- The container image now carries `jobs/SKILL.md`, `workflows/`, `references/`, `style/` and `assets/` (no scripts, no personal data).
+
 ## 2.1.0, server 1.1.0 (2026-09-28)
 
 The skill now targets one bundle of tools, the **Jobs** virtual MCP server, instead of three separately connected tools.

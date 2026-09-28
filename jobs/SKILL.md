@@ -5,7 +5,7 @@ license: MIT
 compatibility: Needs the Jobs MCP server, one endpoint that bundles Career Architect (checks and builders), Reactive Resume (resumes, cover letters, application tracker), Google Drive and Google Docs (the person's records). Local maintainer mode instead needs uv and Python 3.10 or newer.
 metadata:
   author: ConniptionFit
-  version: "2.1.0"
+  version: "2.2.0"
   mcp-server: Jobs
 ---
 
@@ -16,6 +16,8 @@ A person's career is kept as small structured facts (atoms), not prose. Scoring,
 ## The Jobs server
 
 Everything this skill does goes through one MCP server, **Jobs**, which bundles four sources. Each tool is named `<source>__<tool>`, so `google_docs__get_document` is the `get_document` tool of Google Docs. A client may add its own prefix in front (for example `mcp__jobs__`); match on the `<source>__<tool>` part. Some clients load tools on demand: load the ones a task needs before the first call.
+
+This file and every document it names are also served live by the Jobs server: where the skill says to read `references/storage.md` or `workflows/score.md`, a client that has no copy of the skill folder calls `career_architect__guide` with that path as `topic` (`start` returns this file). Use the file when you have it and the tool when you do not.
 
 | Source (tool prefix) | Job | Holds | Protocol |
 |---|---|---|---|

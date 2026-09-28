@@ -45,7 +45,7 @@ from pydantic import Field  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 from starlette.responses import JSONResponse  # noqa: E402
 
-SERVER_VERSION = "1.1.0"
+SERVER_VERSION = "1.2.0"
 log = logging.getLogger("career-mcp")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "WARNING").upper()
 if LOG_LEVEL not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
@@ -56,6 +56,53 @@ MAX_DOC = 250_000            # characters in any one document
 MAX_DOCS = 40                # documents in one list
 MAX_TOTAL = 600_000          # characters across one call
 MAX_BODY = 2_000_000         # bytes in one HTTP request
+
+
+# ---------------------------------------------------------------- the guide (the skill's own documents, served live)
+
+def _guide_root() -> Path:
+    """The skill folder: `jobs/` beside this file in the image, `../jobs` in the repository."""
+    for candidate in (HERE / "jobs", HERE.parent / "jobs"):
+        if (candidate / "SKILL.md").exists():
+            return candidate
+    raise RuntimeError("the skill documents (jobs/SKILL.md) were not found next to the server")
+
+
+def _split_front(text: str) -> tuple[dict, str]:
+    m = re.match(r"---\n(.*?)\n---\n?", text, re.S)
+    if not m:
+        return {}, text
+    try:
+        return yaml.safe_load(m.group(1)) or {}, text[m.end():].lstrip("\n")
+    except yaml.YAMLError:
+        return {}, text[m.end():].lstrip("\n")
+
+
+def _load_guide() -> tuple[dict[str, str], str]:
+    """Every markdown document of the skill, keyed by its path inside the skill folder, and the skill's version. Read once at start:
+    the documents are part of the image, so a deploy is what changes them."""
+    root = _guide_root()
+    docs = {p.relative_to(root).as_posix(): p.read_text(encoding="utf-8") for p in sorted(root.rglob("*.md"))}
+    front, body = _split_front(docs["SKILL.md"])
+    docs["SKILL.md"] = body
+    return docs, str((front.get("metadata") or {}).get("version") or "")
+
+
+GUIDE, GUIDE_VERSION = _load_guide()
+START_TOPICS = ("", "start", "skill", "skill.md")
+
+
+def guide_key(topic: str) -> str | None:
+    """The key of the document a topic names ('start', 'workflows/score', 'references/storage.md', './jobs/style/voice'), or None.
+    Only keys of the bundled documents match, so a topic can never reach any other file."""
+    t = (topic or "").strip()
+    if t.lower() in START_TOPICS:
+        return "SKILL.md"
+    t = re.sub(r"^(\./)?(jobs/)?", "", t)
+    for key in (t, t + ".md"):
+        if key in GUIDE:
+            return key
+    return None
 
 
 # ---------------------------------------------------------------- input handling
@@ -156,7 +203,8 @@ server = MCPServer(
         "Deterministic checks for the `jobs` skill: score a job posting against a skills index, lint a tailored resume or cover letter "
         "against the person's recorded facts, and build the Reactive Resume patch. Stateless: pass the text of the person's documents "
         "(as read from Google Docs, unchanged) in every call; nothing is stored. Run these checks instead of judging by hand: a resume or "
-        "letter that skipped them has not been checked against the person's facts."
+        "letter that skipped them has not been checked against the person's facts. Begin every job-search task by calling `guide`: "
+        "it returns the current instructions for the `jobs` skill (workflow, rules, storage protocol), so a client needs no other copy of them."
     ),
     log_level=LOG_LEVEL,        # the SDK configures logging itself at construction and defaults to INFO, which logs tool error messages
 )
@@ -186,6 +234,18 @@ def info() -> dict[str, Any]:
     """Health check: the server version, its limits and the date it uses for 'present'. Call it first when a task begins or when another tool of this server fails."""
     return {"name": "career-architect", "version": SERVER_VERSION, "today": dt.datetime.now(dt.timezone.utc).date().isoformat(),
             "limits": {"document_chars": MAX_DOC, "documents": MAX_DOCS, "total_chars": MAX_TOTAL}, "stateless": True}
+
+
+@server.tool(title="Read the Jobs guide", annotations=READ_ONLY)
+@guarded
+def guide(topic: Annotated[str, Field(description="`start` (default) for the main instructions, or the path of a document the instructions name, for example `workflows/score.md`, `workflows/resume.md`, `references/storage.md`, `references/reactive-resume.md`, `style/voice.md`, `assets/profile.md`. The `.md` is optional.")] = "start") -> dict[str, Any]:
+    """Use FIRST, at the start of any task about a job posting, resume, cover letter, application, interview or the person's career records, and again whenever the instructions tell you to read
+    another document. Returns the current instructions of the `jobs` skill: the rules that keep every claim traceable to the person's confirmed facts, which tool to call for what, and the
+    storage protocol for their Google Drive. Follow it. It is served live, so it is always the current version. `topic` picks a document; the answer lists every available topic."""
+    key = guide_key(topic)
+    if key is None:
+        raise ToolError(f"no guide document named {str(topic)[:80]!r}. Available: {', '.join(sorted(GUIDE))}")
+    return {"topic": key, "text": GUIDE[key], "skill_version": GUIDE_VERSION, "topics": sorted(GUIDE)}
 
 
 @server.tool(title="Clean text read from Drive", annotations=READ_ONLY)

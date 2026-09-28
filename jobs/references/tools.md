@@ -9,6 +9,7 @@ The `career_architect__*` tools of the Jobs toolset (names below are the bare to
 | Tool | Use it to | Inputs | Returns |
 |---|---|---|---|
 | `info` | check the connection | none | version, limits, the date used for "present" |
+| `guide` | read the skill's own documents from the server, so no local copy is needed and the version is always current | optional `topic` (`start`, or a document path such as `workflows/score.md` or `references/storage.md`; the `.md` is optional) | `text`, `skill_version`, `topics` |
 | `normalize_text` | get clean, editable text from a document you read, before you edit it yourself | `text`, optional `source` (`docs` for Google Docs, `auto`, `drive_read`, `base64`, `plain`) | `text` |
 | `build_index` | validate facts and generate the `skills` document | `facts_docs` (all fragments) | `ok`, `skills_md`, counts; or `errors` |
 | `match` | score a posting's requirements | `skills_md`, `profile_md`, `requirements` | `table`, `ceiling`, `ceiling_if_every_unasked_is_met`, `rows`, `ask` |
