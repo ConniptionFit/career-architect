@@ -1,0 +1,12 @@
+{
+  "name": "career-architect-connect",
+  "owner": { "name": "ConniptionFit", "url": "https://github.com/ConniptionFit" },
+  "metadata": { "description": "The Jobs job-search assistant: launcher skill and connector in one plugin." },
+  "plugins": [
+    {
+      "name": "jobs",
+      "source": "./",
+      "description": "Score job postings, tailor resumes and cover letters, prepare interviews and keep the application tracker, from your own verified records."
+    }
+  ]
+}

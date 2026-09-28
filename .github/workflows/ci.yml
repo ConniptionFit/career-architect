@@ -16,5 +16,5 @@ jobs:
         run: uvx --python 3.12 --from skills-ref agentskills validate jobs
       - name: Manifests and scripts parse
         run: |
-          python3 -c "import json; [json.load(open(p)) for p in ('deploy/jobs-vmcp.json', '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json')]"
+          python3 -c "import json; [json.load(open(p)) for p in ('deploy/jobs-vmcp.json', 'connect/.mcp.json', 'connect/.claude-plugin/plugin.json', 'connect/.claude-plugin/marketplace.json')]"
           node --check deploy/apply-jobs-vmcp.js

@@ -30,7 +30,7 @@ Google Docs   Google Drive       career-architect    Reactive Resume
 | `jobs/scripts/career.py` | The deterministic core, also a command-line tool for local mode. |
 | `mcp-server/` | The hosted MCP server (`server.py`), its hash-pinned dependency lock, `Dockerfile` and `compose.example.yaml`. |
 | `deploy/` | The Jobs vMCP definition (`jobs-vmcp.json`: which tools exist and how they are described) and a script that applies it to Obot. |
-| `.claude-plugin/` | Plugin and marketplace manifests, so Claude apps can install and auto-update the skill. |
+| `connect/` | Template for the one-install plugin (launcher skill + your Jobs connector) that people add in claude.ai, Cowork or Claude Code. |
 | `tests/` | Offline tests: `uv run --python 3.12 --with "mcp==2.2.0" --with pyyaml python -m unittest discover -s tests` |
 | `docs/` | Architecture, operations runbook, security and privacy notes, and [how to extend it](docs/EXTENDING.md). |
 | `setup.sh` | Installer for local mode (one person, files on their machine). |

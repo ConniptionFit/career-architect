@@ -1,0 +1,9 @@
+{
+  "name": "jobs",
+  "displayName": "Jobs (Career Architect)",
+  "description": "Job-search assistant: scores postings against your verified work history and writes tailored resumes and cover letters that claim nothing your records do not support. One install: the launcher skill and the Jobs connector. The instructions are served live by the connector.",
+  "author": { "name": "ConniptionFit", "url": "https://github.com/ConniptionFit" },
+  "homepage": "https://github.com/ConniptionFit/career-architect",
+  "license": "MIT",
+  "keywords": ["jobs", "resume", "cover-letter", "career"]
+}

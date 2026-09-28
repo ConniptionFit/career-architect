@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "jobs": {
+      "type": "http",
+      "url": "https://obot.example.com/mcp-connect/<vmcp id>"
+    }
+  }
+}

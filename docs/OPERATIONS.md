@@ -91,7 +91,7 @@ Known Obot vMCP problems (community `latest`, 2026-09) to keep in mind when you 
    - Skills, Access Policies: the same users, skill = `jobs` (pick the skill itself, not the repository entry, so a skill added to the repository later is not shared automatically).
 3. Narrow any wildcard policy that grants *All Obot Users* (Obot ships an `Everything` policy for servers and for skills). Add the administrator by name to it first, then remove *All Obot Users*, then save. Do it in that order so the administrator never loses access.
 
-**In the Claude apps (claude.ai, Cowork, Claude Code).** These do not read Obot's skill list; they get skills and connectors from a *plugin marketplace*, a Git repository. This repository is one (`.claude-plugin/marketplace.json`, plugin `jobs`). It carries the skill only, because the connector's address is specific to your Obot. To bundle the skill with your Jobs vMCP, so that installing one plugin brings both, publish a small marketplace of your own that names this repository as the skill source and adds the connector, as in `docs/EXTENDING.md`, "A plugin that bundles the skill and your Jobs vMCP". Updates then follow section 7.
+**In the Claude apps (claude.ai, Cowork, Claude Code).** These do not read Obot's skill list. What they need is the connector plus a launcher skill, and `connect/` makes both one install (the plugin). The skill's instructions are not copied to anyone: the connector serves them (`career_architect__guide`), so what people use is whatever the server currently holds. Make the plugin once with `connect/make.sh` and publish it as its own repository (`docs/EXTENDING.md`, "The connect plugin"); people add that repository as a marketplace and install `jobs`. Nothing about it needs to change when the instructions, workflows, tools or descriptions change.
 
 ## 6. Sign-in and default access
 
@@ -119,18 +119,19 @@ Remove them from both `Career Architect users` policies, the Jobs vMCP profile a
 cd <compose-dir>/career-architect-mcp
 git -C src pull --ff-only && docker compose --env-file <env-file> up -d --build
 ```
-Then re-check the tool preview in Obot. Skill changes need no deploy: push to the repository and sync the source.
+Then re-check the tool preview in Obot (and, after a change to the server's tools, regenerate the entry's tool previews). The skill's documents are part of the image, so a change to `jobs/` reaches people when you run this; Obot's own skill source syncs from the repository by itself, hourly.
 
 | What changed | How it reaches people | By itself? |
 |---|---|---|
 | Which tools the Jobs vMCP exposes, and their descriptions | The vMCP is live on Obot. A client reads the tool list when it connects, so a **new conversation** sees the change | Yes. Nothing to sync. A running conversation keeps the list it started with |
 | career-architect server code | Rebuild the container (above); the vMCP serves it immediately | No: deploy by hand, then check the Inspector |
-| The skill, for clients that read it from Obot | Obot re-syncs a Git source **hourly**; *Sync* on the source forces it. Obot's docs describe no update for a copy a client already installed (`obot setup`, an agent's installed skill): reinstall those | Hourly in Obot; not in installed copies |
-| The skill, in claude.ai, Cowork and Claude Code | Through a plugin marketplace. On claude.ai: Customize, Plugins, Add marketplace (GitHub URL); turn on *Sync automatically* for a marketplace you added from github.com, or use *Check for updates*. Team/Enterprise: Organization settings, Plugins & skills, sync from GitHub (webhook on every push to the default branch), availability *Installed by default*. Claude Code: `/plugin`, Marketplaces, *Enable auto-update* (off by default), or `autoUpdate: true` in managed settings | Yes once auto-sync or auto-update is on |
+| The skill's instructions, rules and workflows (`jobs/` in this repository) | Served by the connector: `career_architect__guide` reads them from the server image. **Deploy the server** (section above) and every client that has the connector reads the new text in its next conversation | Yes for everyone, once you deploy. Nothing on a person's machine holds them |
+| The launcher skill in the connect plugin (about ten lines: "call `guide` first") | Marketplace sync, or never: it changes only if the connector address, the tool name or the trigger description changes. An old launcher still works, because it only calls `guide` | Effectively yes |
+| The skill, for Obot's own clients | Obot re-syncs a Git source **hourly**; *Sync* on the source forces it. Obot's docs describe no update for a copy a client already installed (`obot setup`, an agent's installed skill): reinstall those, or rely on `guide` | Hourly in Obot; installed copies not |
 
-Versions: leave `version` out of the plugin manifest and marketplace entry so every commit is an update. If you set one, raise it on every release or nobody receives the change.
+Versions: leave `version` out of the connect plugin's manifests so a change to it is delivered as a new commit. If you set one, raise it on every release or nobody receives the change.
 
-An auto-updated skill and an old tool list can disagree for the length of one conversation. That is why the tests tie the two together and why a release changes both in one commit: `deploy/jobs-vmcp.json` first, applied, then the skill.
+The instructions and the tool list are published in two places (the server image, the vMCP), so a release has an order: to add a tool, apply the spec first, then deploy the instructions that use it; to remove one, deploy the instructions first. The tests tie the two together in the repository, so a commit that breaks the pairing does not pass CI.
 
 **Refreshing pins** (monthly, or when a security advisory lands):
 - Dependencies: from `mcp-server/`, `uv pip compile requirements.in --python-version 3.12 --python-platform linux --generate-hashes -o requirements.lock`, review the diff, run the tests (`README.md`), rebuild.

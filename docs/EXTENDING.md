@@ -6,8 +6,9 @@ Where each kind of change goes, what must change with it, and which test fails i
 
 | The change | Files | Held together by |
 |---|---|---|
-| A new thing the assistant can do (a workflow) | `jobs/workflows/<name>.md`, a row in `jobs/SKILL.md` "Route" | `tests/test_skill_package.py` (frontmatter limits, links, every file reachable from the route table, no personal details) |
+| A new thing the assistant can do (a workflow) | `jobs/workflows/<name>.md`, a row in `jobs/SKILL.md` "Route" | `tests/test_skill_package.py` (frontmatter limits, links, every file reachable from the route table, no personal details), `tests/test_mcp_server.py` (the guide serves every document the skill names). Ships with the next server deploy |
 | A new check or builder (a career-architect tool) | `jobs/scripts/career.py`, `mcp-server/server.py`, `jobs/references/tools.md`, `deploy/jobs-vmcp.json`, `tests/` | `tests/test_deploy_spec.py` (server, spec and tools.md must list the same tools) |
+| The connector address, or how people install it | `connect/`, then `connect/make.sh` again | `tests/test_connect_plugin.py` (the launcher only launches, the generator refuses a wrong address) |
 | Another MCP server in the Jobs vMCP (Gmail, Calendar, Notion, a job board) | Obot, `deploy/jobs-vmcp.json`, a `jobs/references/<source>.md`, a row in `SKILL.md` | `tests/test_deploy_spec.py` (every exposed tool must be explained in the skill; dangerous ones stay off) |
 | Another place to keep the person's records | `jobs/references/storage.md` (the protocol), nothing in the server | `tests/test_deploy_spec.py` (storage.md names exactly the exposed Drive and Docs tools) |
 | A new field in the facts, profile or selection | `jobs/scripts/career.py`, the templates in `jobs/assets/`, `jobs/references/tools.md` | `tests/test_career.py`, `tests/test_hosted_core.py` |
@@ -17,10 +18,9 @@ Run everything with:
 ```
 uv run --python 3.12 --with "mcp==2.2.0" --with pyyaml python -m unittest discover -s tests
 uvx --python 3.12 --from skills-ref agentskills validate jobs
-claude plugin validate .
 ```
 
-`.github/workflows/ci.yml` runs the first two on every push.
+`.github/workflows/ci.yml` runs these on every push, and parses the manifests.
 
 ## Add a workflow
 
@@ -53,39 +53,33 @@ The Jobs vMCP is meant to grow: it is one endpoint, so a person who has it gets 
 
 Nothing in the server knows about Drive. `jobs/references/storage.md` is the whole contract: how to find the workspace, read a document, write one, and what a document looks like. To keep records somewhere else (Notion, a folder, a database), write that protocol for the new place, expose its tools through the vMCP as above, and leave `career.py` and `server.py` alone: they take text in and give text out.
 
-## A plugin that bundles the skill and your Jobs vMCP
+## The connect plugin
 
-This repository is a plugin marketplace whose plugin `jobs` carries the skill only. The address of your Obot and the Jobs vMCP (`https://obot.example.com/mcp-connect/<vmcp id>`) belongs to your deployment, so it stays out of this public repository. To have one install bring both, make a small marketplace of your own, in a repository that only your people can read if you prefer, with one file, `.claude-plugin/marketplace.json`:
+What people install in claude.ai, Cowork or Claude Code is one plugin: a ten-line launcher skill and your Jobs connector. The launcher says "call `career_architect__guide`"; the server answers with the current instructions from `jobs/`. That is why it is set and forget: the instructions are never copied to anyone, so there is nothing to keep in step. The same is true of every MCP client, with or without skills.
 
-```json
-{
-  "name": "jobs-at-example",
-  "owner": { "name": "Example" },
-  "plugins": [
-    {
-      "name": "jobs",
-      "description": "Job-search assistant: the jobs skill and its Jobs connector.",
-      "source": { "source": "github", "repo": "ConniptionFit/career-architect" },
-      "mcpServers": {
-        "jobs": { "type": "http", "url": "https://obot.example.com/mcp-connect/<vmcp id>" }
-      }
-    }
-  ]
-}
+Make it once, and again only if the connector address changes (do not delete and recreate the vMCP: its id is in the address):
+
+```
+connect/make.sh https://<your obot>/mcp-connect/<vmcp id> ../my-jobs-plugin
+cd ../my-jobs-plugin && git init && git add -A && git commit -m "Jobs connect plugin" && gh repo create <name> --public --source . --push
 ```
 
-The skill comes from this repository, at its default branch, so it updates with every commit; the connector is the one line that is yours. In claude.ai the connector then appears on the plugin's *Connectors* tab and each person signs in through Obot; Claude Code loads it with the plugin.
+Make the repository **public**. It holds one address, protected by Obot's sign-in and your access policies, and a private repository could not be added by the people you invite unless you made each a collaborator. (The address does reveal your hostname and vMCP id.)
 
-Add the marketplace: claude.ai, *Customize, Plugins, Add, Add marketplace*; Claude Code, `/plugin marketplace add <owner>/<repo>`. Keeping it current is in `docs/OPERATIONS.md`, section 7. Pin a release instead of tracking `main` by adding `"ref": "<tag>"` to the `source`.
+People add it: claude.ai, *Customize, Plugins, Add, Add marketplace*, the repository; Claude Code, `/plugin marketplace add <owner>/<repo>` then `/plugin install jobs@career-architect-connect`. `connect/README.md` is copied into it and says the same to them.
+
+Why not ship the full skill in the plugin: it would be a copy, and a copy is what goes stale. Claude Code updates marketplaces only when the user turns auto-update on, and on claude.ai the automatic sync needs a webhook on the repository, which the people who add it cannot create. The launcher survives all of that: an old launcher still calls `guide`.
+
+What can still differ per person: whether the assistant calls `guide` first. The launcher, the tool's own description and the vMCP description all say to; check it in a real conversation after a change to any of them.
 
 ## Release checklist
 
-1. Change `deploy/jobs-vmcp.json` and the skill in the same commit; tests, `agentskills validate`, `claude plugin validate .` pass.
+1. Change `deploy/jobs-vmcp.json` and the skill in the same commit; tests and `agentskills validate` pass.
 2. `CHANGELOG.md`: what changed and whether anything must be done by hand.
-3. If `mcp-server/` changed: bump `SERVER_VERSION`; push; on the host `git -C src pull --ff-only && docker compose --env-file <env-file> up -d --build`; check `docker compose logs` is quiet.
-4. If the tool list or descriptions changed: run `deploy/apply-jobs-vmcp.js`; open the Inspector; check the count.
+3. If `mcp-server/` changed, or anything under `jobs/` (the instructions ship in the image): bump `SERVER_VERSION` when the server changed; push; on the host `git -C src pull --ff-only && docker compose --env-file <env-file> up -d --build`; check `docker compose logs` is quiet.
+4. If the tool list or descriptions changed: run `deploy/apply-jobs-vmcp.js`; open the Inspector; check the count. Order: to add a tool, apply first and deploy after; to remove one, deploy first and apply after.
 5. Sync the skill source in Obot (or wait for the hourly sync).
-6. Start a new conversation and run one real task: score a posting.
+6. Start a new conversation in a client with the connector and run one real task: score a posting.
 
 ## Things to know about Obot
 
