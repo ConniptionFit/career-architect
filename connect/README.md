@@ -9,6 +9,11 @@ One install for the Jobs job-search assistant: a small launcher skill and the Jo
 
 You need to be added by the administrator first: Obot shows nothing to anyone it does not know. Use one install path: this plugin, or a copy of the skill, not both.
 
+This plugin's connector address is fixed to one administrator's Obot instance. It only works for the group that
+administrator runs it for; it is not a way to reach anyone else's deployment, including the original
+`career-architect` project's own. Anyone who wants to run this for a different group builds their own copy of this
+plugin from their own Jobs vMCP address (`career-architect`'s `docs/FORKING.md`).
+
 <!-- template-only: make.sh drops everything below this line -->
 
 ## For the administrator

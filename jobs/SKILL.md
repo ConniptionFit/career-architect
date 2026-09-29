@@ -5,7 +5,7 @@ license: MIT
 compatibility: Needs the Jobs MCP server, one endpoint that bundles Career Architect (checks and builders), Reactive Resume (resumes, cover letters, application tracker), Google Drive and Google Docs (the person's records). Local maintainer mode instead needs uv, Python 3.10 or newer, and Reactive Resume's own MCP server connected in the client (references/local-mode.md); it never uses a Reactive Resume API key or address.
 metadata:
   author: ConniptionFit
-  version: "2.4.0"
+  version: "2.4.1"
   mcp-server: Jobs
 ---
 

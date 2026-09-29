@@ -4,6 +4,12 @@ A job-search assistant for a small trusted group, built to run on an [Obot](http
 
 The rule that shapes everything: **no atom, no claim.** Every bullet in a resume or letter traces to something the person confirmed, so nothing they would have to defend in an interview was made up along the way.
 
+> **This repository's hosted deployment (Obot instance, Reactive Resume instance, career-architect MCP server) is
+> personal infrastructure run by the author, [ConniptionFit](https://github.com/ConniptionFit), for their own small
+> group.** It is not a shared or public service, nobody outside that group can sign in to it, and no connect plugin
+> should be built to point at it. If you want to use this skill: run local mode against your own Reactive Resume
+> (below), or fork the repository and stand up your own copy of the whole stack — [docs/FORKING.md](docs/FORKING.md).
+
 ```
       the person's client (Claude, through Obot or a Claude plugin)
                                |
@@ -33,17 +39,21 @@ Google Docs   Google Drive       career-architect    Reactive Resume
 | `connect/` | Template for the one-install plugin (launcher skill + your Jobs connector) that people add in claude.ai, Cowork or Claude Code. |
 | `deploy/update.sh` | One command to deploy a version of the server on the Docker host, and to roll back to a tagged one. |
 | `tests/` | Offline tests: `uv run --python 3.12 --with "mcp==2.2.0" --with pyyaml python -m unittest discover -s tests` |
-| `docs/` | Architecture, operations runbook, security and privacy notes, and [how to extend it](docs/EXTENDING.md). |
+| `docs/` | Architecture, operations runbook, security and privacy notes, [how to extend it](docs/EXTENDING.md), and [how to fork it for your own group](docs/FORKING.md). |
 | `setup.sh` | Installer for local mode (one person, files on their machine). |
 
-## Deploying for a group
+## Deploying for a group, on your own infrastructure
 
-1. Run the MCP server next to Obot (`mcp-server/compose.example.yaml`).
-2. Register it, Reactive Resume, Google Drive and Google Docs as MCP servers in Obot, and bundle them as one **Jobs** vMCP with the tool allowlist in `deploy/jobs-vmcp.json`.
-3. Add this repository as a Skill source in Obot (and, for the Claude apps, as a plugin marketplace); grant the group access.
+This is how the author's own deployment is built, and how to build an independent one of your own — **not** how to
+join the author's. Every box below (Obot, Reactive Resume, the MCP server's Docker host) must be one you administer;
+see [docs/FORKING.md](docs/FORKING.md) for the full checklist, starting from forking the repository.
+
+1. Run the MCP server next to your own Obot (`mcp-server/compose.example.yaml`).
+2. Register it, your own Reactive Resume, Google Drive and Google Docs as MCP servers in your Obot, and bundle them as one **Jobs** vMCP with the tool allowlist in `deploy/jobs-vmcp.json`.
+3. Add your fork as a Skill source in your Obot (and, for the Claude apps, publish your own plugin marketplace, `connect/make.sh`); grant your group access.
 4. Onboard each person: an account, access, and a first conversation that creates their `AI/JobSearch/<name>` Drive folder.
 
-The runbook, with every value to enter, is [docs/OPERATIONS.md](docs/OPERATIONS.md). Design and decisions are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); what is stored, where, and what is protected is in [docs/SECURITY.md](docs/SECURITY.md).
+The runbook, with every value to enter, is [docs/OPERATIONS.md](docs/OPERATIONS.md). Design and decisions are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); what is stored, where, and what is protected is in [docs/SECURITY.md](docs/SECURITY.md); the fork-and-self-host checklist is [docs/FORKING.md](docs/FORKING.md).
 
 ## Local mode
 

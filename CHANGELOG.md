@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.1, server 1.2.0 (2026-09-29)
+
+- **Documentation only.** The README and connect plugin now say plainly that the hosted deployment described here (Obot, Reactive Resume, the career-architect MCP server) is the author's own personal infrastructure for their own group, not a shared or public service, and that no connect plugin should be built to point at it.
+- **New: `docs/FORKING.md`.** The end-to-end process for forking the repository and standing up an independent deployment for a different group: what infrastructure is required (your own Obot, your own Reactive Resume, a Docker host for the MCP server; nothing extra for Google Drive/Docs, which rides on Obot's catalog), the order of steps, and how to build and publish your own connect plugin from your own Jobs vMCP address. Local mode (one person, no Obot) is signposted as the lighter alternative for anyone who does not need the group-hosting path.
+
 ## 2.4.0, server 1.2.0 (2026-09-29)
 
 - **Local mode now uses Reactive Resume's own MCP server instead of its REST API.** `career.py` no longer talks to Reactive Resume over the network at all: `career push`, `pdf`, `resumes`, `cover`, `letters`, `master` and `apply`, the REST client (`api`, `rr_cfg`, the API-key file `~/.config/career/rr.env`), and the diagnostic JSON-RPC probe in `career check` are gone. In their place, `career patch` and `career cover-patch` lint a selection or letter and, if clean, print the Reactive Resume JSON Patch operations or cover-letter HTML; the assistant applies them with Reactive Resume's MCP tools directly (`apply_resume_patch`, `create_cover_letter`, `update_cover_letter`, and the rest of `references/reactive-resume.md`), the same way hosted mode always has. The application tracker is MCP tools only, with no local script command. `career check` is now a local-only sanity check (data folder, `profile.md`, `rr_master`); the person asks the assistant to call `list_resumes` to confirm the Reactive Resume connection itself.
