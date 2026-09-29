@@ -361,25 +361,9 @@ def lint_cover(
     return out
 
 
-def fit_name(company: str, role: str, who: str, kind: str, limit: int = 64) -> str:
-    """'Company - Role - Person Kind' that fits Reactive Resume's MCP name limit (64 characters for resumes). The role gives way first:
-    it is the longest part and the company and person are what a recruiter searches for."""
-    tail = f"{who} {kind}".strip()
-    full = " - ".join(p for p in (company, role, tail) if p)
-    if len(full) <= limit:
-        return full
-    room = limit - len(f"{company} - ") - len(f" - {who}")
-    if room >= 10:
-        return f"{company} - {role[:room].rstrip(' -,&')} - {who}"
-    return full[:limit].rstrip()
-
-
-# Item shapes of Reactive Resume 5.x, used when the caller does not pass the Master's own items. Field names come from the live schema.
-DEFAULT_MASTER = {"data": {"summary": {"title": "Summary", "content": ""}, "sections": {
-    "experience": {"items": [{"id": "x", "hidden": False, "company": "", "position": "", "location": "", "period": "",
-                              "website": {"url": "", "label": "", "inlineLink": False}, "description": "", "roles": []}]},
-    "skills": {"items": [{"id": "y", "hidden": False, "icon": "", "iconColor": "", "name": "", "proficiency": "", "level": 0, "keywords": []}]},
-    "education": {"hidden": False, "items": []}, "certifications": {"hidden": False, "items": []}, "profiles": {"hidden": False, "items": []}}}}
+# fit_name and DEFAULT_MASTER live in career.py so the hosted and local (`career patch`) paths share one definition.
+fit_name = career.fit_name
+DEFAULT_MASTER = career.DEFAULT_MASTER
 
 
 @server.tool(title="Build the Reactive Resume patch", annotations=READ_ONLY)

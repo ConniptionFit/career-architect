@@ -13,8 +13,6 @@ never_claim: []          # e.g. ["kubernetes", "terraform", "direct reports"]
 known_gaps: []           # e.g. ["ci/cd ownership", "soc 2 audit lead"]
 # Things you said but have not yet tied to a job or scope. Scoring shows each as a precise question; it moves into a role's facts once answered.
 pending: {}              # e.g. {hexnode: "says they configured and demoed it; employer not recorded"}
-# Local maintainer mode only (the `career` script): the Reactive Resume address. Leave it out in hosted mode.
-# rr_url: https://resume.example.com
 ---
 
 # Positioning

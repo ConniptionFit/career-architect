@@ -8,25 +8,25 @@
 Everything that does not need judgment lives here so the model spends tokens
 only on requirement extraction and bullet wording:
 
-  init      copy the profile/facts templates into the data folder
-  skills    validate facts.md and regenerate skills.md (years = union of role spans)
-  match     coverage table + score ceiling for a list of job requirements
-  select    ranked candidate atoms per role for a list of tags
-  build     lint a selection.yml and render resume.md for review
-  push      duplicate the Reactive Resume master, patch in the selection, save the PDF
-  pdf       download a resume (or cover letter) PDF from Reactive Resume
-  resumes   list Reactive Resume resumes (finds the master id, tests the key)
-  cover     lint cover.yml, create or update the job's letter in Reactive Resume > Cover Letters, fill the resume's
-            cover-letter section, save cover.pdf
-  letters   the saved Cover Letters list: ls | show | export | import | rename | duplicate | refresh-style | delete
-  master    find your Master resume in Reactive Resume and record its id in profile.md
-  posting   read a public Ashby/Greenhouse/Lever posting: pay range, reports-to, description
-  apply     application tracker in Reactive Resume: add (updates an existing row) | set | find | show | ls | stats | doc
-  check     self-test the Reactive Resume connection: URL, reachability, API key, master resume, cover letters API
+  init         copy the profile/facts templates into the data folder
+  skills       validate facts.md and regenerate skills.md (years = union of role spans)
+  match        coverage table + score ceiling for a list of job requirements
+  select       ranked candidate atoms per role for a list of tags
+  build        lint a selection.yml and render resume.md for review
+  patch        lint a selection.yml and, if clean, print the Reactive Resume JSON Patch operations
+               (apply them with the Reactive Resume MCP server's apply_resume_patch)
+  cover-patch  lint cover.yml and, if clean, print the HTML for a Reactive Resume saved cover letter
+               (create or update it with the Reactive Resume MCP server's create_cover_letter/update_cover_letter)
+  posting      read a public Ashby/Greenhouse/Lever posting: pay range, reports-to, description
+  check        confirm the data folder and profile.md are set up (no network)
+
+This script never talks to Reactive Resume itself: it only produces the JSON Patch operations and HTML that go into
+its MCP tools, which the assistant calls directly once the Reactive Resume MCP server is connected (see
+`references/local-mode.md` for how to connect it, and `references/reactive-resume.md` for which tools to use).
+Resumes, PDFs, saved cover letters and the application tracker all live in Reactive Resume; nothing here stores a
+Reactive Resume address or API key.
 
 Data folder: --data, $CAREER_DATA, or the default below.
-Reactive Resume URL: rr_url in profile.md (one place; $RR_URL overrides). API key: $RR_API_KEY or
-~/.config/career/rr.env. The key is never stored in the data folder.
 """
 from __future__ import annotations
 
@@ -34,9 +34,7 @@ import argparse
 import base64
 import copy
 import datetime as dt
-import hashlib
 import html
-import ipaddress
 import json
 import os
 import re
@@ -51,8 +49,9 @@ from pathlib import Path
 import yaml
 
 DEFAULT_ROOT = Path.home() / "Documents/Career Architect"
-CONF = Path.home() / ".config/career/rr.env"
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
+# ATS APIs answer Python's default urllib User-Agent with a block on some hosts; name ourselves.
+USER_AGENT = "career-architect/3"
 
 DEPTH = {"exposure": 0, "used": 1, "owned": 2, "designed": 3}
 STATUS = {"verified", "needs_number", "unconfirmed", "excluded"}
@@ -951,168 +950,34 @@ def cmd_build(ctx: Ctx, args):
     return 1 if errors or (args.strict and warns) else 0
 
 
-# ---------------------------------------------------------------- Reactive Resume API
-
-# Cloudflare and similar proxies answer Python's default urllib User-Agent with a 403 "Error 1010", so name ourselves.
-USER_AGENT = "career-architect/2"
-
-
-class ApiError(Exception):
-    def __init__(self, status, body, url=""):
-        low, hint = body.lower(), ""
-        if "cloudflare" in low or "error 1010" in low:
-            hint = " (Cloudflare blocked the request: check WAF/bot rules or an Access policy covering /api/openapi)"
-        elif status in (401, 403) and body.lstrip().startswith("<"):
-            hint = " (an HTML answer means a login proxy sits in front: exempt /api/openapi or use a service token)"
-        elif status == 401 and "unauthorized" in low:
-            hint = (" (the server rejected the API key. Create a new key in Reactive Resume under Settings > API Keys on this same instance"
-                    " (keys expire and are per instance), then run: bash ~/Projects/career-architect/setup.sh --rekey)")
-        super().__init__(f"{url} -> HTTP {status}: {body[:200]}{hint}")
-        self.status, self.body = status, body
-
-
-def _is_local(host: str) -> bool:
-    if host == "localhost" or host.endswith((".local", ".lan", ".internal", ".home.arpa")) or "." not in host:
-        return True
-    try:
-        ip = ipaddress.ip_address(host)
-        return ip.is_private or ip.is_loopback
-    except ValueError:
-        return False
-
-
-def normalize_url(u: str) -> str:
-    """https unless the host is local/private. A public host answers http with a redirect, which would break POST/PATCH."""
-    u = u.strip().rstrip("/")
-    if "://" not in u:
-        u = "https://" + u
-    p = urllib.parse.urlsplit(u)
-    scheme = "http" if p.scheme == "http" and _is_local(p.hostname or "") else "https"
-    path = p.path.rstrip("/")
-    if path.endswith("/api/openapi"):  # tolerate the spec's server URL being pasted
-        path = path[: -len("/api/openapi")]
-    return urllib.parse.urlunsplit((scheme, p.netloc, path, "", ""))
-
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *a, **kw):
-        return None  # surface the 3xx instead of silently re-sending a POST/PATCH as a GET
-
-
-_opener = urllib.request.build_opener(_NoRedirect)
-
-
-def rr_cfg(ctx: Ctx) -> dict:
-    if getattr(ctx, "_rr", None):
-        return ctx._rr
-    conf = {}
-    if CONF.exists():
-        if CONF.stat().st_mode & 0o077:
-            print(f"warning: {CONF} is readable by other users; run chmod 600 on it", file=sys.stderr)
-        for line in CONF.read_text().splitlines():
-            k, _, v = line.partition("=")
-            conf[k.strip()] = v.strip().strip("'\"")
-    # The URL is not a secret and has one home, profile.md. $RR_URL overrides it; a stale RR_URL left in rr.env is the last resort.
-    for src, val in (("$RR_URL", os.environ.get("RR_URL")), ("profile.md", ctx.profile.get("rr_url")), ("rr.env", conf.get("RR_URL"))):
-        if val:
-            break
-    else:
-        die(f"no Reactive Resume URL: set rr_url in {ctx.root / 'profile.md'}")
-    ctx._rr = {"url": normalize_url(val), "src": src, "key": os.environ.get("RR_API_KEY") or conf.get("RR_API_KEY")}
-    return ctx._rr
-
-
-def api(ctx: Ctx, method: str, path: str, body=None, raw=False, multipart=None, auth=True, root=False):
-    cfg = rr_cfg(ctx)
-    if auth and not cfg["key"]:
-        die(f"no API key: put RR_API_KEY=... in {CONF} (chmod 600). Never paste it into chat or the vault.")
-    url = f"{cfg['url']}{'' if root else '/api/openapi'}{path}"
-    headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
-    if auth:
-        headers["x-api-key"] = cfg["key"]
-    data = None
-    if multipart:
-        boundary = uuid.uuid4().hex
-        name, filename, blob = multipart
-        data = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\n"
-                f"Content-Type: application/pdf\r\n\r\n").encode() + blob + f"\r\n--{boundary}--\r\n".encode()
-        headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
-    elif body is not None:
-        data = json.dumps(body).encode()
-        headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    try:
-        with _opener.open(req, timeout=60) as r:
-            blob = r.read()
-    except urllib.error.HTTPError as e:
-        text = e.read().decode("utf8", "replace")
-        if 300 <= e.code < 400:
-            text = f"redirected to {e.headers.get('Location')}; set rr_url in profile.md to that exact address"
-        raise ApiError(e.code, text, url)
-    except OSError as e:
-        die(f"cannot reach {cfg['url']}: {getattr(e, 'reason', e)}")
-    if raw:
-        return blob
-    return json.loads(blob) if blob else None
-
-
-def mcp_rpc(ctx: Ctx, method: str, params=None):
-    """One JSON-RPC call to the Reactive Resume MCP endpoint (same x-api-key as the REST API). Used by `career check`;
-    the MCP tools themselves are called by Claude, not by this script."""
-    cfg = rr_cfg(ctx)
-    if not cfg["key"]:
-        die(f"no API key: put RR_API_KEY=... in {CONF} (chmod 600). Never paste it into chat or the vault.")
-    url = f"{cfg['url']}/mcp"
-    headers = {"User-Agent": USER_AGENT, "Content-Type": "application/json", "Accept": "application/json, text/event-stream", "x-api-key": cfg["key"]}
-    req = urllib.request.Request(url, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}).encode(), headers=headers, method="POST")
-    try:
-        with _opener.open(req, timeout=30) as r:
-            text = r.read().decode("utf8", "replace")
-    except urllib.error.HTTPError as e:
-        raise ApiError(e.code, e.read().decode("utf8", "replace"), url)
-    except OSError as e:
-        die(f"cannot reach {cfg['url']}: {getattr(e, 'reason', e)}")
-    # A streamable-HTTP server may answer with plain JSON or with one SSE `data:` event.
-    payload = next((ln[5:].strip() for ln in text.splitlines() if ln.startswith("data:")), text.strip())
-    try:
-        msg = json.loads(payload)
-    except ValueError:
-        raise CheckFail(f"{url} did not answer with JSON-RPC: {text[:120]!r}")
-    if msg.get("error"):
-        raise CheckFail(f"{method}: {msg['error'].get('message', msg['error'])}")
-    return msg.get("result") or {}
-
-
-def as_list(resp):
-    if isinstance(resp, list):
-        return resp
-    if isinstance(resp, dict):
-        for k in ("items", "data", "applications", "resumes"):
-            if isinstance(resp.get(k), list):
-                return resp[k]
-    return []
-
-
-def cmd_resumes(ctx: Ctx, args):
-    for r in as_list(api(ctx, "GET", "/resumes")):
-        print(f"{r.get('id')} | {r.get('slug')} | {r.get('name')} | {','.join(r.get('tags') or [])}"
-              f"{' | locked' if r.get('isLocked') else ''}")
-    return 0
-
+# ---------------------------------------------------------------- Reactive Resume JSON Patch
+#
+# This script never calls Reactive Resume: it only builds the JSON Patch `operations` and HTML that its MCP server's
+# tools (apply_resume_patch, create_cover_letter, update_cover_letter) take as input. The assistant calls those tools
+# directly once the Reactive Resume MCP server is connected (references/local-mode.md, references/reactive-resume.md).
 
 def slugify(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:60]
 
 
 def doc_title(ctx: Ctx, target: dict, kind: str = "Resume") -> str:
-    """'Company - Role - Name Resume': the job title travels with the document so a recruiter, a Drive search
+    """'Company - Role - Name Resume': the job title travels with the document so a recruiter, a file search
     and a downloaded file all show which role it was written for."""
     who = str(ctx.profile.get("name") or "").strip()
     return " - ".join(p for p in (target.get("company"), target.get("role"), f"{who} {kind}".strip()) if p)
 
 
-def file_safe(s: str) -> str:
-    return re.sub(r'[\\/:*?"<>|]+', "-", s).strip()
+def fit_name(company: str, role: str, who: str, kind: str, limit: int = 64) -> str:
+    """'Company - Role - Person Kind' trimmed to fit Reactive Resume's name limit (64 characters for resumes). The
+    role gives way first: it is the longest part, and the company and person are what a search turns up."""
+    tail = f"{who} {kind}".strip()
+    full = " - ".join(p for p in (company, role, tail) if p)
+    if len(full) <= limit:
+        return full
+    room = limit - len(f"{company} - ") - len(f" - {who}")
+    if room >= 10:
+        return f"{company} - {role[:room].rstrip(' -,&')} - {who}"
+    return full[:limit].rstrip()
 
 
 def html_list(bullets) -> str:
@@ -1213,291 +1078,60 @@ def design_ops(master: dict) -> list:
     return [{"op": "replace", "path": f"/metadata/{k}", "value": meta[k]} for k in DESIGN_KEYS if k in meta]
 
 
-def us_defaults_ops(master: dict) -> list:
-    """Reactive Resume defaults to A4 and a 1.5 line height; a US resume wants Letter and a tighter page (1.25 fits a 12-year history on two pages). Only while still at those defaults."""
-    meta, ops = master["data"].get("metadata") or {}, []
-    if (meta.get("page") or {}).get("format") == "a4":
-        ops.append({"op": "replace", "path": "/metadata/page/format", "value": "letter"})
-    if ((meta.get("typography") or {}).get("body") or {}).get("lineHeight") in (1.5, 1.35):  # 1.35 was an earlier default of this tool
-        ops.append({"op": "replace", "path": "/metadata/typography/body/lineHeight", "value": 1.25})
-    return ops
+# Item shapes of Reactive Resume 5.x, used when the person has not passed the Master's own items with --master-json.
+DEFAULT_MASTER = {"data": {"summary": {"title": "Summary", "content": ""}, "sections": {
+    "experience": {"items": [{"id": "x", "hidden": False, "company": "", "position": "", "location": "", "period": "",
+                              "website": {"url": "", "label": "", "inlineLink": False}, "description": "", "roles": []}]},
+    "skills": {"items": [{"id": "y", "hidden": False, "icon": "", "iconColor": "", "name": "", "proficiency": "", "level": 0, "keywords": []}]},
+    "education": {"hidden": False, "items": []}, "certifications": {"hidden": False, "items": []}, "profiles": {"hidden": False, "items": []}}}}
 
 
-def cover_section_ops(resume: dict, master: dict | None) -> list:
-    """Add a cover-letter section when the resume has none: a copy of the Master's if it has one, else a default. The section is
-    deliberately left out of the page layout, which keeps the letter out of the resume PDF (verified on Reactive Resume 5.3.1)."""
-    if any(c.get("type") == "cover-letter" for c in resume["data"].get("customSections") or []):
-        return []
-    src = next((c for c in ((master or {}).get("data") or {}).get("customSections") or [] if c.get("type") == "cover-letter"), None)
-    sec = copy.deepcopy(src) if src else {"title": "Cover Letter", "icon": "", "columns": 1, "hidden": False, "showHeading": False,
-                                          "keepTogether": True, "startOnNewPage": True, "type": "cover-letter", "items": []}
-    sec["id"] = str(uuid.uuid4())
-    sec["items"] = [{"id": str(uuid.uuid4()), "hidden": False, "recipient": "", "content": ""}]
-    return [{"op": "add", "path": "/customSections/-", "value": sec}]
+def load_master_json(arg: str | None) -> dict:
+    if not arg:
+        return copy.deepcopy(DEFAULT_MASTER)
+    master = json.loads(Path(arg).expanduser().read_text())
+    try:
+        master["data"]["sections"]["experience"], master["data"]["sections"]["skills"]
+    except (KeyError, TypeError):
+        die("--master-json must be the Master resume JSON (from the MCP tool `read_resume`): an object with "
+            "data.sections.experience and data.sections.skills")
+    return master
 
 
-def cmd_push(ctx: Ctx, args):
+def cmd_patch(ctx: Ctx, args):
+    """Lint a selection and, if it is clean, print the Reactive Resume JSON Patch operations that fill a duplicate
+    of the Master: apply them unchanged with the MCP tool `apply_resume_patch` (references/reactive-resume.md,
+    "Resumes"). Pass --master-json the Master's own JSON (read it first with the MCP tool `read_resume`) so field
+    shapes match the instance; without it, Reactive Resume 5.x's own defaults are used."""
     path, sel = load_selection(ctx, args.job)
     issues = lint(ctx, sel)
-    errs = [i for i in issues if i[0] == "E"]
-    if errs:
-        for lv, where, msg in errs:
-            print(f"{lv} {where}: {msg}")
-        die("lint errors; fix them (or run `build`) before pushing", 1)
-    job = path.parent
+    for lv, where, msg in issues:
+        print(f"{lv} {where}: {msg}")
+    errors = sum(1 for i in issues if i[0] == "E")
+    (path.parent / "resume.md").write_text(render_text(ctx, sel))
+    if errors:
+        die(f"{errors} lint error(s); fix them (see resume.md) before patching", 1)
     target = sel.get("target") or {}
     if not (target.get("company") and target.get("role")):
-        die("selection.yml needs target.company and target.role: the job title goes into the resume's name and PDF filename", 1)
-    state_file = job / "rr.json"
-    state = json.loads(state_file.read_text()) if state_file.exists() else {}
-    master_id = args.master or ctx.profile.get("rr_master")
-    if not master_id:
-        die("no master resume: set rr_master in profile.md (find it with `career resumes`)")
-    master = api(ctx, "GET", f"/resumes/{master_id}")
-
-    rid = state.get("id")
-    if not rid:
-        slug = slugify(f"{target['company']} - {target['role']}")  # the URL slug stays short; the name carries the full title
-        for attempt in (slug, f"{slug}-{ctx.today:%Y%m%d}"):
-            try:
-                rid = api(ctx, "POST", f"/resumes/{master_id}/duplicate", {"name": doc_title(ctx, target), "slug": attempt, "tags": ["tailored"]})
-                break
-            except ApiError as e:
-                if e.status == 400 and "SLUG" in e.body.upper():
-                    continue
-                raise
-        if not rid:
-            die("could not create a unique slug")
-        state_file.write_text(json.dumps({"id": rid}))
-
+        die("selection.yml needs target.company and target.role: they name the resume and its PDF", 1)
+    master = load_master_json(args.master_json)
     ops = content_ops(ctx, sel, master)
     if args.sync_design:
         ops = design_ops(master) + ops
-    api(ctx, "PATCH", f"/resumes/{rid}", {"operations": ops})
-    pdf = api(ctx, "GET", f"/resumes/{rid}/pdf?target=resume", raw=True)
-    if not pdf.startswith(b"%PDF"):
-        die(f"/pdf did not return a PDF (first bytes: {pdf[:40]!r}); export from the RR UI instead")
-    titled = job / f"{file_safe(doc_title(ctx, target))}.pdf"
-    previous = job / state["pdf"] if state.get("pdf") else None
-    if previous and previous != titled and previous.exists():  # a role or company rename must not leave the old titled file behind
-        previous.unlink()
-    titled.write_bytes(pdf)
-    (job / "resume.pdf").write_bytes(pdf)  # stable name for scripts and notes; the titled file is the one to send
-    state_file.write_text(json.dumps({**state, "id": rid, "pdf": titled.name}))
-    app_file = job / "app.json"
-    if app_file.exists():  # a tracked application: keep the board pointing at this resume (idempotent)
-        aid = json.loads(app_file.read_text()).get("id")
-        if aid:
-            api(ctx, "PUT", f"/applications/{aid}", {"resumeId": rid})
-            print(f"linked to application {aid}")
-    print(f"resume id: {rid} (Reactive Resume stores it: download the PDF from the link below, no other upload needed)\nopen in Reactive Resume: {rr_cfg(ctx)['url']}/builder/{rid}\npdf: {titled} ({len(pdf)} bytes)")
+    who = str(ctx.profile.get("name") or "").strip()
+    print(json.dumps({
+        "resume_name": fit_name(target["company"], target["role"], who, "Resume"),
+        "resume_name_full": doc_title(ctx, target),
+        "resume_slug": slugify(f"{target['company']} - {target['role']}"),
+        "operations": ops,
+    }, indent=2))
     return 0
 
 
-# ---------------------------------------------------------------- saved cover letters (Reactive Resume > Cover Letters)
-#
-# Newer Reactive Resume keeps saved letters as their own documents (dashboard > Cover Letters), separate from the letter section
-# inside a resume. They carry a `revision`: PUT and DELETE must send the revision they read (`expectedRevision`), so a save made
-# in the browser is never silently overwritten. `cover` creates and updates the job's saved letter; `letters` reads and writes the list.
-
-def html_text(s) -> str:
-    """Plain text of a cover-letter HTML fragment: paragraph ends and <br> become line breaks."""
-    s = re.sub(r"(?i)<br\s*/?>", "\n", s or "")
-    s = re.sub(r"(?i)</p>\s*<p[^>]*>", "\n\n", s)
-    return html.unescape(re.sub(r"<[^>]+>", "", s)).strip()
-
-
-def letter_sha(recipient, content) -> str:
-    return hashlib.sha1(f"{recipient or ''}\n{content or ''}".encode()).hexdigest()[:16]
-
-
-def letters_url(ctx: Ctx) -> str:
-    return f"{rr_cfg(ctx)['url']}/dashboard/cover-letters"
-
-
-def list_letters(ctx: Ctx, **filters) -> list:
-    """Every saved letter matching the filters (search, resumeId, applicationId), fetched page by page."""
-    rows, offset, size = [], 0, 50
-    while True:
-        q = urllib.parse.urlencode({**{k: v for k, v in filters.items() if v}, "limit": size, "offset": offset})
-        page = api(ctx, "GET", f"/cover-letters?{q}")
-        items = as_list(page)
-        rows += items
-        offset += len(items)
-        total = page.get("total") if isinstance(page, dict) else None
-        if not items or len(items) < size or (isinstance(total, int) and offset >= total):
-            return rows
-
-
-def job_ids(job: Path) -> tuple:
-    """(resume id, application id) this job folder remembers."""
-    def read(name):
-        f = job / name
-        return json.loads(f.read_text()).get("id") if f.exists() else None
-    return read("rr.json"), read("app.json")
-
-
-def find_job_letter(ctx: Ctx, job: Path, name: str = ""):
-    """The saved letter that belongs to this job folder, or None. First the id kept in cover.json, then a lookup among the
-    letters linked to the job's resume or tracker row (by name when there are several)."""
-    f = job / "cover.json"
-    cid = json.loads(f.read_text()).get("id") if f.exists() else None
-    if cid:
-        try:
-            return api(ctx, "GET", f"/cover-letters/{cid}")
-        except ApiError as e:
-            if e.status != 404:
-                raise                      # 404 means it was deleted in Reactive Resume: look for another one below
-    found = {}
-    for key, val in zip(("resumeId", "applicationId"), job_ids(job)):
-        if val:
-            for row in list_letters(ctx, **{key: val}):
-                found[row["id"]] = row
-    rows = list(found.values())
-    pick = [r for r in rows if name and r.get("name") == name] or rows
-    if len(pick) > 1:
-        die("more than one saved cover letter is linked to this job; pass the id:\n" + "\n".join(f"  {r['id']} | {r.get('name')}" for r in pick))
-    return api(ctx, "GET", f"/cover-letters/{pick[0]['id']}") if pick else None
-
-
-def resolve_letter(ctx: Ctx, args) -> dict:
-    """The one saved letter a `letters` command means: an id, or --job."""
-    if getattr(args, "id", None):
-        return api(ctx, "GET", f"/cover-letters/{args.id}")
-    if getattr(args, "job", None):
-        job = ctx.job_dir(args.job)
-        found = find_job_letter(ctx, job)
-        if not found:
-            die(f"no saved cover letter for {job.name}; `career cover {job.name}` creates it")
-        return found
-    die("pass a letter id (see `career letters ls`) or --job <slug>")
-
-
-def write_letter(ctx: Ctx, cur: dict, **fields) -> dict:
-    """Update a saved letter using the revision just read. A revision conflict means it changed meanwhile: stop, do not retry blindly."""
-    try:
-        out = api(ctx, "PUT", f"/cover-letters/{cur['id']}", {"expectedRevision": cur["revision"], **fields})
-    except ApiError as e:
-        if e.status in (409, 412) or "revision" in e.body.lower():
-            die(f"'{cur.get('name')}' was saved in Reactive Resume while this command ran (revision conflict). Nothing was overwritten; run it again.", 1)
-        raise
-    return out if isinstance(out, dict) and out.get("id") else api(ctx, "GET", f"/cover-letters/{cur['id']}")
-
-
-def sync_saved_letter(ctx: Ctx, job: Path, letter: dict, rid: str, overwrite: bool = False) -> str:
-    """Keep the job's saved letter in step with cover.yml: create it on the first run, update the same one afterwards. A letter that was
-    edited in Reactive Resume since the last run is left alone unless `overwrite`. Returns the letter id ('' when the API is absent)."""
-    name = doc_title(ctx, letter.get("target") or {}, "Cover Letter")[:100]
-    recipient, content = letter_html(ctx, letter)
-    sent = letter_sha(recipient, content)
-    state_file = job / "cover.json"
-    state = json.loads(state_file.read_text()) if state_file.exists() else {}
-    try:
-        cur = find_job_letter(ctx, job, name)
-    except ApiError as e:
-        if e.status != 404:
-            raise
-        print("note: this Reactive Resume has no Cover Letters API (an older version), so the letter stays inside the resume only")
-        return ""
-
-    def remember(doc):
-        state_file.write_text(json.dumps({"id": doc["id"], "sent": sent, "seen": letter_sha(doc.get("recipient"), doc.get("content"))}))
-
-    if cur is None:
-        body = {"name": name, "recipient": recipient, "content": content, "resumeId": rid}
-        aid = job_ids(job)[1]
-        if aid:
-            body["applicationId"] = aid
-        made = api(ctx, "POST", "/cover-letters", body)
-        doc = made if isinstance(made, dict) and made.get("id") else api(ctx, "GET", f"/cover-letters/{made}")
-        remember(doc)
-        print(f"created cover letter '{doc.get('name', name)}' in Reactive Resume: {letters_url(ctx)}")
-        return doc["id"]
-    seen = letter_sha(cur.get("recipient"), cur.get("content"))
-    mine = state.get("id") == cur["id"]                     # this job folder wrote the letter
-    if mine and state.get("sent") == sent and (state.get("seen") == seen or not overwrite):
-        if state.get("seen") == seen:
-            print(f"cover letter '{cur.get('name')}' is already up to date in Reactive Resume")
-        else:                                               # cover.yml has not changed, so there is nothing to push; keep the edits
-            print(f"note: the saved cover letter '{cur.get('name')}' has edits made in Reactive Resume and was left as is; cover.pdf still comes from "
-                  f"cover.yml. `career letters show --job {job.name}` reads the saved text; `career cover {job.name} --overwrite` replaces it")
-        return cur["id"]
-    if not (mine and state.get("seen") == seen) and not overwrite:
-        die(f"the saved cover letter '{cur.get('name')}' was changed in Reactive Resume after the last `career cover` (or this job has no record of "
-            f"writing it), and cover.yml would replace it. Nothing was overwritten. Read it with `career letters show --job {job.name}`, "
-            f"or replace it with cover.yml via `career cover {job.name} --overwrite`.", 1)
-    doc = write_letter(ctx, cur, recipient=recipient, content=content)   # the name is left alone: a rename in Reactive Resume is respected
-    remember(doc)
-    print(f"updated cover letter '{doc.get('name', cur.get('name'))}' in Reactive Resume: {letters_url(ctx)}")
-    return doc["id"]
-
-
-def cmd_letters(ctx: Ctx, args):
-    act = args.action
-    if act == "ls":
-        filters = {"search": args.search, "resumeId": args.resume, "applicationId": args.application}
-        if args.job:
-            rid, aid = job_ids(ctx.job_dir(args.job))
-            if not (rid or aid):
-                die(f"{args.job} has no rr.json or app.json yet, so no letter can be linked to it")
-            filters["resumeId"] = filters["resumeId"] or rid
-        rows = list_letters(ctx, **filters)
-        for r in rows:
-            print(f"{r.get('id')} | {r.get('name')} | rev {r.get('revision')} | resume {r.get('sourceResumeId') or '-'} | "
-                  f"application {r.get('sourceApplicationId') or '-'} | updated {r.get('updatedAt') or '-'}")
-        print(f"{len(rows)} saved cover letter(s) ({letters_url(ctx)})")
-        return 0
-    if act == "import":
-        doc = json.loads(Path(args.file).expanduser().read_text())
-        never = [re.compile(r"\b" + re.escape(str(x)) + r"\b", re.I) for x in ctx.profile.get("never_claim") or []]
-        issues = prose_issues([("recipient", html_text(doc.get("recipient"))), ("content", html_text(doc.get("content")))], never, first_person_ok=True)
-        for lv, where, msg in issues:
-            print(f"{lv} {where}: {msg}")
-        if any(i[0] == "E" for i in issues):
-            die("the letter breaks never_claim; fix it before importing (imported text is not checked against your atoms)", 1)
-        made = api(ctx, "POST", "/cover-letters/import", {"document": doc})
-        made = made if isinstance(made, dict) else {"id": made}
-        print(f"imported '{made.get('name') or doc.get('name')}' as {made.get('id')}: {letters_url(ctx)}")
-        return 0
-    cur = resolve_letter(ctx, args)
-    if act == "show":
-        head = (f"{cur.get('name')} [{cur['id']}] | rev {cur.get('revision')} | resume {cur.get('sourceResumeId') or '-'} | "
-                f"application {cur.get('sourceApplicationId') or '-'} | updated {cur.get('updatedAt') or '-'}")
-        body = (f"{cur.get('recipient') or ''}\n{cur.get('content') or ''}" if args.html
-                else f"{html_text(cur.get('recipient'))}\n\n{html_text(cur.get('content'))}")
-        print(head + "\n\n" + body)
-        if args.output:
-            Path(args.output).expanduser().write_text(body + "\n")
-            print(f"\nwrote {args.output}")
-    elif act == "export":
-        doc = api(ctx, "GET", f"/cover-letters/{cur['id']}/export")
-        out = Path(args.output or f"{file_safe(cur.get('name') or cur['id'])}.cover-letter.json").expanduser()
-        out.write_text(json.dumps(doc, indent=2))
-        print(f"wrote {out}")
-    elif act == "rename":
-        doc = write_letter(ctx, cur, name=args.name[:100])
-        print(f"renamed to '{doc.get('name', args.name)}'")
-    elif act == "duplicate":
-        made = api(ctx, "POST", f"/cover-letters/{cur['id']}/duplicate", {"name": args.name} if args.name else {})
-        made = made if isinstance(made, dict) else {"id": made}
-        print(f"duplicated '{cur.get('name')}' as {made.get('id')}" + (f" ('{made['name']}')" if made.get("name") else ""))
-    elif act == "refresh-style":
-        rid = args.resume or cur.get("sourceResumeId") or (job_ids(ctx.job_dir(args.job))[0] if args.job else None)
-        if not rid:
-            die("this letter is not linked to a resume: pass --resume <id> to copy that resume's style onto it")
-        api(ctx, "POST", f"/cover-letters/{cur['id']}/refresh-style", {"expectedRevision": cur["revision"], "resumeId": rid})
-        print(f"copied the style of resume {rid} onto '{cur.get('name')}'")
-    elif act == "delete":
-        if not args.yes:
-            die(f"this permanently deletes '{cur.get('name')}' [{cur['id']}] from Reactive Resume; add --yes to confirm")
-        api(ctx, "DELETE", f"/cover-letters/{cur['id']}", {"expectedRevision": cur["revision"]})
-        if args.job:
-            (ctx.job_dir(args.job) / "cover.json").unlink(missing_ok=True)
-        print(f"deleted '{cur.get('name')}' [{cur['id']}]")
-    return 0
-
-
-def cmd_cover(ctx: Ctx, args):
+def cmd_cover_patch(ctx: Ctx, args):
+    """Lint a cover letter and, if it is clean, print the HTML for a Reactive Resume saved cover letter: create or
+    update it with the MCP tools `create_cover_letter` / `update_cover_letter` (references/reactive-resume.md,
+    "Cover letters"). The job's tailored resume (`career patch`) should exist first."""
     job = ctx.job_dir(args.job)
     src = job / "cover.yml"
     if not src.exists():
@@ -1508,369 +1142,36 @@ def cmd_cover(ctx: Ctx, args):
         print(f"{lv} {where}: {msg}")
     errors = sum(1 for i in issues if i[0] == "E")
     (job / "cover.md").write_text(letter_text(ctx, letter))
-    print(f"{errors} error(s), {len(issues) - errors} warning(s); wrote {job / 'cover.md'}")
-    if errors or args.dry:
-        return 1 if errors else 0
-    rid = (json.loads((job / "rr.json").read_text()) if (job / "rr.json").exists() else {}).get("id")
-    if not rid:
-        die("no tailored resume for this job yet: run `career push <slug>` first (the letter lives inside that resume)")
-    if args.attach and not (job / "app.json").exists():
-        die("--attach needs a tracker entry: run `career apply add --job <slug> ...` first")
-    if not args.no_saved:   # first, so a letter edited in Reactive Resume stops the run before anything is written
-        sync_saved_letter(ctx, job, letter, rid, args.overwrite)
-    resume = api(ctx, "GET", f"/resumes/{rid}")
-    secs = resume["data"].get("customSections") or []
-    i = next((n for n, sec in enumerate(secs) if sec.get("type") == "cover-letter"), None)
-    if i is None:
-        master_id = (ctx.profile.get("rr_master") or "").strip()
-        add = cover_section_ops(resume, api(ctx, "GET", f"/resumes/{master_id}") if master_id else None)
-        api(ctx, "PATCH", f"/resumes/{rid}", {"operations": add})
-        secs = secs + [add[0]["value"]]  # '/-' appends, so it is the last one
-        i = len(secs) - 1
-        print("added a cover-letter section to this resume")
-    tpl = (secs[i].get("items") or [{}])[0]
+    if errors:
+        die(f"{errors} lint error(s); fix them (see cover.md) before patching", 1)
     recipient, content = letter_html(ctx, letter)
-    item = {**tpl, "id": tpl.get("id") or str(uuid.uuid4()), "hidden": False, "recipient": recipient, "content": content}
-    ops = [{"op": "replace", "path": f"/customSections/{i}/items", "value": [item]}]
-    if secs[i].get("hidden"):
-        ops.append({"op": "replace", "path": f"/customSections/{i}/hidden", "value": False})
-        print("note: the cover-letter section was hidden in the Master; unhid it. Check resume.pdf still has no letter page.")
-    api(ctx, "PATCH", f"/resumes/{rid}", {"operations": ops})
-    pdf = api(ctx, "GET", f"/resumes/{rid}/pdf?target=cover-letter", raw=True)
-    if not pdf.startswith(b"%PDF"):
-        die(f"/pdf?target=cover-letter did not return a PDF (first bytes: {pdf[:40]!r}); export it from the RR UI instead")
-    (job / "cover.pdf").write_bytes(pdf)
-    print(f"cover letter pdf: {job / 'cover.pdf'} ({len(pdf)} bytes)")
-    if args.attach:
-        attach_doc(ctx, json.loads((job / "app.json").read_text())["id"], "cover-letter", job / "cover.pdf")
-        print("attached cover-letter to the tracker entry")
+    print(json.dumps({
+        "name": doc_title(ctx, letter.get("target") or {}, "Cover Letter")[:100],
+        "recipient_html": recipient,
+        "content_html": content,
+    }, indent=2))
     return 0
-
-
-def cmd_master_fill(ctx: Ctx, args):
-    """Populate the Master with real content (so a template can be judged on it), a cover-letter section, and US page defaults."""
-    rid = args.id or (ctx.profile.get("rr_master") or "").strip()
-    if not rid:
-        die("no master resume: run `career master` first")
-    path, sel = load_selection(ctx, args.source)
-    errs = [i for i in lint(ctx, sel) if i[0] == "E"]
-    if errs:
-        for lv, where, msg in errs:
-            print(f"{lv} {where}: {msg}")
-        die(f"lint errors in {path}; fix them first", 1)
-    master = api(ctx, "GET", f"/resumes/{rid}")
-    ops = content_ops(ctx, sel, master) + cover_section_ops(master, master) + us_defaults_ops(master)
-    api(ctx, "PATCH", f"/resumes/{rid}", {"operations": ops})
-    print(f"Master filled from {path.parent.name}: {len(sel.get('roles') or [])} roles, header, education, certifications, "
-          f"{'a cover-letter section, ' if any(o['path'] == '/customSections/-' for o in ops) else ''}"
-          f"{'US Letter and a tighter line height' if any(o['path'].startswith('/metadata') for o in ops) else 'page settings left as you set them'}")
-    return 0
-
-
-def cmd_master(ctx: Ctx, args):
-    if args.fill:
-        return cmd_master_fill(ctx, args)
-    prof = ctx.root / "profile.md"
-    if not prof.exists():
-        die(f"{prof} not found. Run `career init` first.")
-    rid = args.id
-    current = (ctx.profile.get("rr_master") or "").strip()
-    if args.if_unset and current:
-        print(f"master already set ({current}); keeping it")
-        return 0
-    if not rid:
-        rows = as_list(api(ctx, "GET", "/resumes"))
-        cands = [r for r in rows if "master" in f"{r.get('name', '')} {r.get('slug', '')}".lower()]
-        if not cands and args.create:
-            # an empty resume (no sample data to leak into copies); restyle it in the builder whenever you like
-            rid = api(ctx, "POST", "/resumes", {"name": "Master", "slug": "master", "tags": ["master"], "withSampleData": False})
-            print("created an empty 'Master' resume with Reactive Resume's default template; pick another template in the builder any time")
-        elif len(cands) != 1:
-            print("could not pick the Master automatically. Resumes:" if rows else "no resumes found in Reactive Resume yet.")
-            for r in rows:
-                print(f"  {r.get('id')} | {r.get('name')}")
-            print("Name your styled resume 'Master', run: career master <id>, or run: career master --create")
-            return 1
-        else:
-            rid = cands[0]["id"]
-            print(f"master: '{cands[0].get('name')}'")
-    text, n = re.subn(r'(?m)^(rr_master:[ \t]*)("[^"]*"|[^\s#]*)', lambda m: f'{m.group(1)}"{rid}"', prof.read_text(), count=1)
-    if not n:
-        die("profile.md has no rr_master line")
-    prof.write_text(text)
-    print(f"rr_master set to {rid}")
-    return 0
-
-
-class CheckFail(Exception):
-    pass
 
 
 def cmd_check(ctx: Ctx, args):
-    cfg = rr_cfg(ctx)
-    print(f"url   {cfg['url']}  (from {cfg['src']})")
-    failed = False
+    """Local sanity check only: this script never reaches Reactive Resume. To confirm the connection itself, ask the
+    assistant to call the Reactive Resume MCP tool `list_resumes`."""
+    ok = True
 
-    def step(label, fn):
-        nonlocal failed
-        try:
-            print(f"ok    {label}: {fn()}")
-        except (ApiError, CheckFail, KeyError, ValueError) as e:
-            failed = True
-            print(f"FAIL  {label}: {e}")
+    def step(label, cond, detail):
+        nonlocal ok
+        print(f"{'ok  ' if cond else 'FAIL'}  {label}: {detail}")
+        ok = ok and cond
 
-    step("reachable", lambda: "/api/health " + json.dumps(api(ctx, "GET", "/api/health", auth=False, root=True))[:80])
-    if not cfg["key"]:
-        print(f"FAIL  api key: not set (put RR_API_KEY=... in {CONF}, chmod 600)")
-        return 1
-    step("api key", lambda: f"{len(as_list(api(ctx, 'GET', '/resumes')))} resumes visible")
-    master = ctx.profile.get("rr_master")
-    if not master:
-        print(f"FAIL  master: rr_master not set in {ctx.root / 'profile.md'} (find the id with `career resumes`)")
-        return 1
-
-    def check_master():
-        d = api(ctx, "GET", f"/resumes/{master}")
-        sec = d["data"]["sections"]
-        if not isinstance(d["data"].get("summary"), dict) or "experience" not in sec or "skills" not in sec:
-            raise CheckFail("master is missing summary/experience/skills")
-        has_cover = any(c.get("type") == "cover-letter" for c in d["data"].get("customSections") or [])
-        return (f"'{d.get('name')}' has {len(sec['experience']['items'])} experience and {len(sec['skills']['items'])} skill items"
-                + (" (locked)" if d.get("isLocked") else "")
-                + ("; cover-letter section present" if has_cover else "; NO cover-letter section yet (`career master --fill` or `career cover` adds one)"))
-
-    step("master", check_master)
-
-    def check_letters():
-        try:
-            page = api(ctx, "GET", "/cover-letters?limit=1")
-        except ApiError as e:
-            if e.status == 404:
-                return "not available on this Reactive Resume (older version); `career cover` keeps the letter inside the resume only"
-            raise
-        total = page.get("total") if isinstance(page, dict) else None
-        return f"{total if isinstance(total, int) else len(as_list(page))} saved cover letter(s) visible ({letters_url(ctx)})"
-
-    step("cover letters", check_letters)
-
-    def check_mcp():
-        init = mcp_rpc(ctx, "initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "career-check", "version": "1"}})
-        tools = mcp_rpc(ctx, "tools/list").get("tools") or []
-        if not tools:
-            raise CheckFail("the MCP endpoint lists no tools")
-        return f"{cfg['url']}/mcp accepts the key ({(init.get('serverInfo') or {}).get('name', '?')} {(init.get('serverInfo') or {}).get('version', '')}, {len(tools)} tools)"
-
-    step("mcp endpoint", check_mcp)
-
-    def check_mcp_registered():
-        # Claude Code lists user-scope servers in ~/.claude.json; only the presence of the entry is read, never its contents.
-        cfg_file = Path.home() / ".claude.json"
-        entry = (json.loads(cfg_file.read_text()).get("mcpServers") or {}).get("reactive-resume") if cfg_file.exists() else None
-        if not entry:
-            raise CheckFail("not registered; run: claude mcp add-json -s user reactive-resume "
-                            "'{\"type\":\"http\",\"url\":\"" + cfg["url"] + "/mcp\",\"headersHelper\":\"" + str(Path.home() / ".config/career/rr-mcp-headers.sh") + "\"}'")
-        helper = entry.get("headersHelper")
-        if helper and not os.access(helper, os.X_OK):
-            raise CheckFail(f"headersHelper {helper} is missing or not executable (chmod 700 it)")
-        if entry.get("url") != f"{cfg['url']}/mcp":
-            raise CheckFail(f"registered for {entry.get('url')}, but rr_url is {cfg['url']}")
-        return "registered in Claude Code (user scope)" + ("; key comes from rr.env via the header helper" if helper else "; static headers, not the helper")
-
-    step("mcp registration", check_mcp_registered)
-    return 1 if failed else 0
-
-
-def cmd_pdf(ctx: Ctx, args):
-    pdf = api(ctx, "GET", f"/resumes/{args.id}/pdf?target={args.target}", raw=True)
-    if not pdf.startswith(b"%PDF"):
-        die(f"not a PDF (first bytes: {pdf[:40]!r})")
-    Path(args.output).write_bytes(pdf)
-    print(f"wrote {args.output} ({len(pdf)} bytes)")
-    return 0
-
-
-# ---------------------------------------------------------------- applications
-
-STAGE_ORDER = ["saved", "applied", "screening", "interview", "offer"]
-# Fields the tracker accepts, by CLI flag. Everything the user or research learns about a posting belongs in one of them.
-APP_FIELDS = (("location", "location"), ("salary", "salary"), ("source", "source"), ("url", "sourceUrl"))
-
-
-def _norm(s) -> str:
-    s = re.sub(r"[^a-z0-9 ]+", " ", str(s or "").lower().replace("&", " and "))
-    s = re.sub(r"\bsr\b", "senior", s)
-    s = re.sub(r"\bjr\b", "junior", s)
-    s = re.sub(r"\bsystems?\b", "system", s)  # "Systems Administrator" vs "System Administrator"
-    return " ".join(s.split())
-
-
-def find_applications(ctx: Ctx, company: str, role: str = "") -> list:
-    """Existing tracker rows for this company, best role match first. Company must match exactly (normalised);
-    the role can differ in wording (Sr. vs Senior, a suffix like '- Remote'), so an unrelated role at the same
-    company is listed last, not dropped: the caller decides."""
-    import difflib
-    cn, rn = _norm(company), _norm(role)
-    hits = []
-    for a in as_list(api(ctx, "GET", "/applications")):
-        if _norm(a.get("company")) != cn:
-            continue
-        an = _norm(a.get("role"))
-        score = 1.0 if an == rn else (0.9 if rn and (rn in an or an in rn) else difflib.SequenceMatcher(None, rn, an).ratio())
-        hits.append((score, a))
-    hits.sort(key=lambda t: -t[0])
-    return [a for _, a in hits]
-
-
-def resolve_app(ctx: Ctx, args) -> dict:
-    """The one application a command means: explicit id, else the job folder's app.json, else company (+ role) lookup."""
-    aid = getattr(args, "id", None)
-    if not aid and getattr(args, "job", None):
-        f = ctx.job_dir(args.job) / "app.json"
-        if f.exists():
-            aid = json.loads(f.read_text())["id"]
-    if not aid and getattr(args, "company", None):
-        hits = find_applications(ctx, args.company, getattr(args, "role", "") or "")
-        good = [a for a in hits if _norm(a.get("role")) == _norm(getattr(args, "role", ""))
-                or (getattr(args, "role", "") and _norm(args.role) in _norm(a.get("role")))
-                or (getattr(args, "role", "") and _norm(a.get("role")) in _norm(args.role))]
-        good = good or (hits if len(hits) == 1 and not getattr(args, "role", "") else [])
-        if len(good) > 1:
-            die("more than one matching application; pass the id:\n" + "\n".join(f"  {a['id']} | {a['role']} | {a.get('status')}" for a in good))
-        if not good:
-            die(f"no application for {args.company} / {getattr(args, 'role', '')}; `career apply add` creates one")
-        aid = good[0]["id"]
-    if not aid:
-        die("no application id: pass an id, --job with an existing jobs/<slug>/app.json, or --company (and --role)")
-    return api(ctx, "GET", f"/applications/{aid}") if not isinstance(aid, dict) else aid
-
-
-def app_id(ctx: Ctx, args) -> str:
-    if getattr(args, "id", None):
-        return args.id
-    r = resolve_app(ctx, args)
-    return r["id"] if isinstance(r, dict) and r.get("id") else die("could not resolve the application")
-
-
-def attach_doc(ctx: Ctx, aid: str, kind: str, file: Path):
-    api(ctx, "POST", f"/applications/{aid}/documents/{kind}", multipart=("file", file.name, file.read_bytes()))
-
-
-RESEARCH_HEAD = re.compile(r"(?m)^(?:== )?RESEARCH \d{4}-\d{2}-\d{2}")
-RESEARCH_END = "== END RESEARCH =="
-
-
-def merge_notes(old: str, new: str) -> str:
-    """Existing notes are context, not truth. Hand-logged lines (Gmail, earlier scoring) stay, but a research block is
-    a snapshot: a new one REPLACES the previous research block so stale pay, dates and contacts do not linger.
-    Any other text is appended, and repeating identical text is a no-op."""
-    old, new = (old or "").strip(), (new or "").strip()
-    if not new:
-        return old
-    if RESEARCH_HEAD.match(new):
-        m = RESEARCH_HEAD.search(old)
-        if m:  # drop the old block: from its header to its end marker, or to the end of the notes if it has none
-            end = old.find(RESEARCH_END, m.start())
-            tail = old[end + len(RESEARCH_END):].strip() if end != -1 else ""
-            old = (old[:m.start()].strip() + ("\n\n" + tail if tail else "")).strip()
-        if RESEARCH_END not in new:
-            new += "\n" + RESEARCH_END
-    elif new in old:
-        return old
-    return f"{old}\n\n{new}" if old else new
-
-
-def build_app_body(ctx: Ctx, args, existing: dict = None) -> dict:
-    """Fields to send. Whatever the current request states wins over what the row holds (the row may be stale);
-    fields the request does not mention are left alone."""
-    body = {}
-    for flag, key in APP_FIELDS:
-        v = getattr(args, flag, None)
-        if v and v != (existing or {}).get(key):
-            body[key] = v
-    notes = args.notes
-    if getattr(args, "notes_file", None):
-        notes = Path(args.notes_file).expanduser().read_text()
-    if notes:
-        body["notes"] = notes if getattr(args, "replace_notes", False) else merge_notes((existing or {}).get("notes"), notes)
-    if getattr(args, "jd_file", None):
-        body["jobDescription"] = Path(args.jd_file).expanduser().read_text()[:20000]
-    elif args.job and (ctx.job_dir(args.job) / "jd.md").exists():
-        body["jobDescription"] = (ctx.job_dir(args.job) / "jd.md").read_text()[:20000]
-    if args.job and (ctx.job_dir(args.job) / "rr.json").exists():
-        body["resumeId"] = json.loads((ctx.job_dir(args.job) / "rr.json").read_text())["id"]
-    return body
-
-
-def show_app(a: dict):
-    for k in ("id", "company", "role", "status", "salary", "location", "source", "sourceUrl", "resumeId", "appliedAt", "followUpAt", "followUpNote"):
-        if a.get(k):
-            print(f"{k}: {a[k]}")
-    print(f"notes: {a.get('notes') or ''}")
-    print(f"jobDescription: {len(a.get('jobDescription') or '')} chars")
-    for ev in a.get("activity") or []:
-        print(f"  {ev.get('at', '')[:10]} {ev.get('type')} {ev.get('stage') or ev.get('text') or ''}"[:200])
-
-
-def cmd_apply(ctx: Ctx, args):
-    act = args.action
-    if act == "add":
-        hits = [] if args.force_new else find_applications(ctx, args.company, args.role)
-        same = [a for a in hits if _norm(a.get("role")) == _norm(args.role) or _norm(args.role) in _norm(a.get("role")) or _norm(a.get("role")) in _norm(args.role)]
-        if same:
-            # One row per position. Bring the existing row up to date with this request; the stage only moves forward here (use `set` to go back).
-            cur = api(ctx, "GET", f"/applications/{same[0]['id']}")
-            body = build_app_body(ctx, args, cur)
-            st, now = cur.get("status"), args.status
-            if now and now != st and (now == "rejected" or (now in STAGE_ORDER and st in STAGE_ORDER and STAGE_ORDER.index(now) > STAGE_ORDER.index(st))):
-                body["status"] = now
-            if body:
-                api(ctx, "PUT", f"/applications/{cur['id']}", body)
-            print(f"existing application {cur['id']} ({cur.get('company')} | {cur.get('role')} | {cur.get('status')}): updated "
-                  + (", ".join(body) or "nothing (already up to date)") + ". Not creating a new row.")
-            if args.job:
-                (ctx.job_dir(args.job) / "app.json").write_text(json.dumps({"id": cur["id"]}))
-            return 0
-        if hits:
-            print("note: same company, different role already tracked: " + "; ".join(f"{a['role']} ({a.get('status')})" for a in hits), file=sys.stderr)
-        body = {"company": args.company, "role": args.role, "status": args.status, **build_app_body(ctx, args)}
-        new = api(ctx, "POST", "/applications", body)
-        print(f"application id: {new}")
-        if args.job:
-            (ctx.job_dir(args.job) / "app.json").write_text(json.dumps({"id": new}))
-    elif act == "set":
-        cur = resolve_app(ctx, args)
-        body = build_app_body(ctx, args, cur)
-        if args.status:
-            body["status"] = args.status
-        if args.followup:
-            body["followUpAt"] = f"{args.followup}T09:00:00Z"
-        if args.followup_note:
-            body["followUpNote"] = args.followup_note
-        if args.archive:
-            body["archived"] = True
-        body.pop("resumeId", None) if not args.job else None
-        if not body:
-            die("nothing to change")
-        api(ctx, "PUT", f"/applications/{cur['id']}", body)
-        print(f"updated {cur.get('company')} | {cur.get('role')}: " + ", ".join(body))
-    elif act == "find":
-        for a in find_applications(ctx, args.company, args.role or ""):
-            print(f"{a.get('id')} | {a.get('company')} | {a.get('role')} | {a.get('status')}")
-    elif act == "show":
-        show_app(resolve_app(ctx, args))
-    elif act == "ls":
-        for a in as_list(api(ctx, "GET", "/applications")):
-            if not args.status or a.get("status") == args.status:
-                print(f"{a.get('id')} | {a.get('company')} | {a.get('role')} | {a.get('status')}")
-    elif act == "stats":
-        s = api(ctx, "GET", "/applications/stats")
-        print(f"total: {s.get('total')}")
-        for row in s.get("byStage") or []:
-            print(f"{row.get('status')}: {row.get('count')}")
-    elif act == "doc":
-        attach_doc(ctx, app_id(ctx, args), args.kind, Path(args.file).expanduser())
-        print(f"attached {args.kind}")
-    return 0
+    step("data folder", ctx.root.is_dir(), str(ctx.root))
+    for name in ("profile.md", "facts.md", "rules.md"):
+        p = ctx.root / name
+        step(name, p.exists(), str(p) if p.exists() else f"missing; run `career init`")
+    master = (ctx.profile.get("rr_master") or "").strip()
+    step("rr_master in profile.md", bool(master),
+         master or "not set; ask the assistant to call the MCP tool `list_resumes`, find your Master, and set rr_master")
+    print("Reactive Resume connection: not checked here; ask the assistant to call the MCP tool `list_resumes`.")
+    return 0 if ok else 1
 
 
 # ---------------------------------------------------------------- posting lookup
@@ -1949,7 +1250,7 @@ def parse_posting(url: str, fetch=None) -> dict:
         res.update(title=j.get("text"), location=cats.get("location"), published=made,
                    text=" ".join([j.get("descriptionPlain") or "", lists, j.get("additionalPlain") or ""]).strip())
     else:
-        die("unsupported posting URL (Ashby, Greenhouse and Lever are handled); read the page and use `career apply set` instead")
+        die("unsupported posting URL (Ashby, Greenhouse and Lever are handled); read the page and record what it says in the application's notes instead")
     res["pay"] += [f"in text: {x}" for x in _pay_from_text(res["text"])]
     m = re.search(r"(?:reports? (?:directly )?to|reporting to)\s+(?:the\s+)?([^.;]{3,70})", res["text"], re.I)
     res["reports_to"] = m.group(1).strip() if m else None
@@ -2004,120 +1305,24 @@ def main(argv=None):
     p.add_argument("job", help="jobs/<slug> name or path to selection.yml")
     p.add_argument("--strict", action="store_true", help="treat warnings as errors")
     p.set_defaults(fn=cmd_build)
-    p = sub.add_parser("push")
+    p = sub.add_parser("patch", help="lint a selection and print the Reactive Resume JSON Patch operations to apply with apply_resume_patch")
     p.add_argument("job")
-    p.add_argument("--master", help="master resume id (default: rr_master in profile.md)")
+    p.add_argument("--master-json", help="path to the Master resume JSON (from the MCP tool read_resume); omit to use Reactive Resume 5.x defaults")
     p.add_argument("--sync-design", action="store_true", help="also copy the Master's template, page, typography and layout onto this resume")
-    p.set_defaults(fn=cmd_push)
-    p = sub.add_parser("pdf")
-    p.add_argument("id")
-    p.add_argument("--target", choices=["resume", "cover-letter"], default="resume")
-    p.add_argument("-o", "--output", default="out.pdf")
-    p.set_defaults(fn=cmd_pdf)
-    sub.add_parser("resumes").set_defaults(fn=cmd_resumes)
+    p.set_defaults(fn=cmd_patch)
     sub.add_parser("check").set_defaults(fn=cmd_check)
-    p = sub.add_parser("cover")
+    p = sub.add_parser("cover-patch", help="lint a cover letter and print the HTML to save with create_cover_letter / update_cover_letter")
     p.add_argument("job", help="jobs/<slug> name or path")
-    p.add_argument("--dry", action="store_true", help="lint and write cover.md only; no network")
-    p.add_argument("--attach", action="store_true", help="attach cover.pdf to this job's tracker entry")
-    p.add_argument("--overwrite", action="store_true", help="replace the saved letter even if it was edited in Reactive Resume after the last run")
-    p.add_argument("--no-saved", action="store_true", help="only fill the resume's cover-letter section and save cover.pdf; leave Reactive Resume > Cover Letters alone")
-    p.set_defaults(fn=cmd_cover)
-    p = sub.add_parser("letters", help="the saved Cover Letters list in Reactive Resume: read, rename, duplicate, delete, import and export")
-    p.set_defaults(fn=cmd_letters)
-    lsub = p.add_subparsers(dest="action", required=True)
-
-    def letter_ref(a):
-        a.add_argument("id", nargs="?", help="letter id (see `letters ls`); or use --job")
-        a.add_argument("--job", help="jobs/<slug>: that job's saved letter")
-    a = lsub.add_parser("ls", help="list saved letters")
-    a.add_argument("--search")
-    a.add_argument("--resume", help="only letters linked to this resume id")
-    a.add_argument("--application", help="only letters linked to this tracker row id")
-    a.add_argument("--job", help="only the letters linked to this job's resume")
-    a = lsub.add_parser("show", help="print a letter as text (or HTML)")
-    letter_ref(a)
-    a.add_argument("--html", action="store_true", help="print the stored HTML instead of plain text")
-    a.add_argument("-o", "--output", help="also write the letter text to this file")
-    a = lsub.add_parser("export", help="save a letter as a Reactive Resume cover-letter JSON document")
-    letter_ref(a)
-    a.add_argument("-o", "--output")
-    a = lsub.add_parser("import", help="create a letter from an exported JSON document (checked against never_claim)")
-    a.add_argument("file")
-    a = lsub.add_parser("rename")
-    letter_ref(a)
-    a.add_argument("--name", required=True)
-    a = lsub.add_parser("duplicate")
-    letter_ref(a)
-    a.add_argument("--name", help="name of the copy")
-    a = lsub.add_parser("refresh-style", help="copy the linked resume's template and design onto the letter")
-    letter_ref(a)
-    a.add_argument("--resume", help="resume whose style to copy (default: the one the letter is linked to)")
-    a = lsub.add_parser("delete", help="permanently delete a saved letter")
-    letter_ref(a)
-    a.add_argument("--yes", action="store_true", help="confirm the deletion")
-    p = sub.add_parser("master")
-    p.add_argument("id", nargs="?", help="resume id; omit to auto-detect a resume named 'Master'")
-    p.add_argument("--if-unset", action="store_true", help="do nothing when rr_master is already set")
-    p.add_argument("--create", action="store_true", help="create an empty 'Master' resume when none exists")
-    p.add_argument("--fill", action="store_true", help="fill the Master with a job's selection (default: general), a cover-letter section and US Letter defaults")
-    p.add_argument("--from", dest="source", default="general", help="job whose selection fills the Master (default: general)")
-    p.set_defaults(fn=cmd_master)
+    p.set_defaults(fn=cmd_cover_patch)
     p = sub.add_parser("posting", help="fetch a public Ashby/Greenhouse/Lever posting: pay, reports-to, description")
     p.add_argument("url")
     p.add_argument("--out", help="write the description text here (e.g. jobs/<slug>/jd.md)")
     p.add_argument("--chars", type=int, default=1500, help="how much description to print when --out is not given")
     p.set_defaults(fn=cmd_posting)
-    p = sub.add_parser("apply")
-    p.set_defaults(fn=cmd_apply)
-    asub = p.add_subparsers(dest="action", required=True)
-    st = ["saved", "applied", "screening", "interview", "offer", "rejected"]
-    def app_fields(a):
-        for f in ("location", "salary", "source", "url", "notes"):
-            a.add_argument(f"--{f}")
-        a.add_argument("--notes-file", help="read notes from a file (long research blocks)")
-        a.add_argument("--jd-file", help="store this file as the job description")
-        a.add_argument("--replace-notes", action="store_true", help="overwrite the notes instead of appending")
-    a = asub.add_parser("add", help="creates a row, or updates the existing one for the same company + role")
-    a.add_argument("--company", required=True)
-    a.add_argument("--role", required=True)
-    a.add_argument("--status", choices=st, default="saved")
-    a.add_argument("--job", help="jobs/<slug>: links its RR resume and jd.md")
-    a.add_argument("--force-new", action="store_true", help="skip the existing-row check")
-    app_fields(a)
-    a = asub.add_parser("set")
-    a.add_argument("id", nargs="?")
-    a.add_argument("--job")
-    a.add_argument("--company", help="find the row by company (+ --role) instead of an id")
-    a.add_argument("--role")
-    a.add_argument("--status", choices=st)
-    a.add_argument("--followup", help="YYYY-MM-DD")
-    a.add_argument("--followup-note")
-    a.add_argument("--archive", action="store_true")
-    app_fields(a)
-    a = asub.add_parser("find")
-    a.add_argument("--company", required=True)
-    a.add_argument("--role")
-    a = asub.add_parser("show")
-    a.add_argument("id", nargs="?")
-    a.add_argument("--job")
-    a.add_argument("--company")
-    a.add_argument("--role")
-    a = asub.add_parser("ls")
-    a.add_argument("--status", choices=st)
-    asub.add_parser("stats")
-    a = asub.add_parser("doc")
-    a.add_argument("kind", choices=["resume", "cover-letter"])
-    a.add_argument("file")
-    a.add_argument("id", nargs="?")
-    a.add_argument("--job")
     args = ap.parse_args(argv)
     today = dt.date.fromisoformat(args.today) if args.today else dt.date.today()
     ctx = Ctx(args.data, today)
-    try:
-        return args.fn(ctx, args) or 0
-    except ApiError as e:
-        die(str(e))
+    return args.fn(ctx, args) or 0
 
 
 if __name__ == "__main__":

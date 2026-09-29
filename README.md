@@ -47,7 +47,7 @@ The runbook, with every value to enter, is [docs/OPERATIONS.md](docs/OPERATIONS.
 
 ## Local mode
 
-One person, no Obot: `bash setup.sh` installs the skill into `~/.claude/skills/jobs`, stores a Reactive Resume API key (input hidden, `~/.config/career/rr.env`, mode 600) and creates the data folder (`$CAREER_DATA`, default `~/Documents/Career Architect`). See `jobs/references/local-mode.md` and [docs/LOCAL-MODE.md](docs/LOCAL-MODE.md). `setup.sh` copies the whole `jobs/` folder over an existing install, so run it only on a machine where that is what you want.
+One person, no Obot: `bash setup.sh` installs the skill into `~/.claude/skills/jobs` and creates the data folder (`$CAREER_DATA`, default `~/Documents/Career Architect`). It never touches Reactive Resume; connect Reactive Resume's own MCP server in your client once (`jobs/references/local-mode.md` has the exact command). See that file and [docs/LOCAL-MODE.md](docs/LOCAL-MODE.md). `setup.sh` copies the whole `jobs/` folder over an existing install, so run it only on a machine where that is what you want.
 
 ## Status
 

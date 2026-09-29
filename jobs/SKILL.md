@@ -2,10 +2,10 @@
 name: jobs
 description: Career assistant that scores job postings against a person's verified work history, writes tailored resumes and cover letters that claim nothing their records do not support, prepares interviews, researches applications and keeps the application tracker. Each person's qualifications live in their own Google Drive, in a folder named after them under `AI/JobSearch`; resumes, cover letters and the tracker live in Reactive Resume. Use it for anything about a job posting, resume, cover letter, application, interview or job-search research, and for first-time setup of a person's career records.
 license: MIT
-compatibility: Needs the Jobs MCP server, one endpoint that bundles Career Architect (checks and builders), Reactive Resume (resumes, cover letters, application tracker), Google Drive and Google Docs (the person's records). Local maintainer mode instead needs uv and Python 3.10 or newer.
+compatibility: Needs the Jobs MCP server, one endpoint that bundles Career Architect (checks and builders), Reactive Resume (resumes, cover letters, application tracker), Google Drive and Google Docs (the person's records). Local maintainer mode instead needs uv, Python 3.10 or newer, and Reactive Resume's own MCP server connected in the client (references/local-mode.md); it never uses a Reactive Resume API key or address.
 metadata:
   author: ConniptionFit
-  version: "2.3.0"
+  version: "2.4.0"
   mcp-server: Jobs
 ---
 

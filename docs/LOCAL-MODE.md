@@ -1,18 +1,18 @@
 # Local mode notes
 
-Local mode is one person working from a folder with the `career` script and a Reactive Resume API key. The commands are listed in `jobs/references/local-mode.md`. Notes from testing it:
+Local mode is one person working from a folder with the `career` script and Reactive Resume's own MCP server connected in their client. The commands are listed in `jobs/references/local-mode.md`.
 
-## Reactive Resume behind a proxy
-A Cloudflare-fronted instance rejects Python's default User-Agent with `403 Error 1010`. The script sends its own (`career-architect/2`) and reports a proxy block or a login page with a specific hint. If you add Cloudflare Access or a WAF rule, exempt `/api/openapi/*`. Plain `http://` to a public host is upgraded to `https://` because the server's 301 would otherwise turn POST and PATCH into GETs.
+## The script never touches Reactive Resume
+
+Earlier versions of this script called Reactive Resume's REST API directly (an API key in `~/.config/career/rr.env`, `career push`, `career cover`, `career letters`, `career master`, `career pdf`, `career apply`, `career resumes`). Reactive Resume now ships its own MCP server, so the script no longer needs to speak HTTP to it at all: `career patch` and `career cover-patch` print the JSON Patch operations and HTML, and the assistant applies them with Reactive Resume's MCP tools directly, the same way hosted mode always has (`jobs/references/reactive-resume.md`). This removed several hundred lines of REST client code and the local API-key file entirely.
 
 ## One-time setup in Reactive Resume
-1. Create an API key (Settings > API Keys) on the instance named by `rr_url` and give it to `setup.sh` when asked.
-2. `setup.sh` creates an empty **Master** resume if none exists. `career master --fill` populates it with real content and US Letter defaults, only while the page settings are still Reactive Resume's defaults.
-3. Open the Master in the builder and pick a template while looking at real content. Every tailored resume copies the Master's template and design.
+
+1. Create an API key (Settings > API Keys), or use OAuth if the client supports it.
+2. Register the Reactive Resume MCP server with your client (`jobs/references/local-mode.md` has the exact command for Claude Code).
+3. Ask the assistant to call `list_resumes` to confirm the connection, find (or create) your styled "Master" resume, and record its id as `rr_master` in `profile.md`.
+4. Open the Master in the builder and pick a template while looking at real content (`career patch general` with no `--master-json` uses Reactive Resume 5.x's own item shapes, enough to fill the Master once for this).
 
 ## Verification status
-Verified against Reactive Resume 5.3.1 with real PDFs rendered and inspected:
-- API key auth, listing, create, duplicate, JSON Patch (including design settings under `/metadata`), PDF download.
-- `push`: a duplicate of the Master inherits template and design and gets the summary, experience, skills, header links, education and certifications.
-- Saved cover letters: `cover` creates the job's letter linked to its resume and tracker row and updates the same one later; `career letters` lists, shows, exports, imports, renames, duplicates, refreshes the style of and deletes them. Updates and deletes send the `expectedRevision` they read. A letter edited in the browser is never overwritten without `--overwrite`. There is no PDF endpoint for saved letters, so `cover.pdf` comes from the resume's `target=cover-letter` render.
-- The `tests/test_live_cover_letters.py` test runs only with `CAREER_LIVE=1` and touches only letters it creates and deletes.
+
+Verified against Reactive Resume 5.3.1's REST API through the version that used it directly (real PDFs rendered and inspected: JSON Patch, including design settings under `/metadata`, duplicate, PDF download). The current MCP-based flow reuses the exact same `career.content_ops` / `career.letter_html` functions that hosted mode's server already exercises against a live instance, so the operations produced are unchanged; what changed is who sends them over the wire.

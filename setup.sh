@@ -1,23 +1,21 @@
 #!/usr/bin/env bash
 # LOCAL MODE installer: one person, files on their own machine, no Obot. (For a group, see docs/OPERATIONS.md.)
-# Installs the jobs skill (invoke it with /jobs) and sets up Reactive Resume access. Safe to re-run.
+# Installs the jobs skill (invoke it with /jobs) and the local data folder. Safe to re-run.
 #
-#   bash setup.sh                # asks for the API key only if none is stored yet
-#   bash setup.sh --rekey        # replace the stored key
+#   bash setup.sh                # install / update
 #   bash setup.sh --yes          # replace an existing, different installed skill without asking
 #
 # The installed skill is the whole jobs/ folder, hosted-mode front page included: tell it you are working locally
 # (see jobs/references/local-mode.md). The data folder is $CAREER_DATA, default ~/Documents/Career Architect.
 #
-# It never touches your profile.md or facts.md (beyond filling an empty rr_master), and the key is
-# read with echo off, written to ~/.config/career/rr.env (mode 600), and never printed.
+# This script never touches Reactive Resume: connecting its MCP server is a one-time step in your client, not
+# something this script can do (see "Next" below). It never touches your profile.md or facts.md.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS="${CAREER_SKILLS_DIR:-$HOME/.claude/skills}"
 SRC="$HERE/jobs"
 DEST="$SKILLS/jobs"
-CONF="$HOME/.config/career/rr.env"
 CAREER="$DEST/scripts/career.py"
 
 command -v uv >/dev/null || { echo "uv is required (brew install uv)" >&2; exit 1; }
@@ -42,27 +40,19 @@ if [ -f "$LEGACY/scripts/career.py" ] && grep -q "Deterministic helpers" "$LEGAC
   rm -rf "$LEGACY"; echo "skill    removed the old copy at $LEGACY"
 fi
 
-# 2. API key: only the key goes in this file; the URL lives in profile.md
-if [ "${1:-}" = "--rekey" ] || ! { [ -f "$CONF" ] && grep -q '^RR_API_KEY=.' "$CONF"; }; then
-  printf 'Reactive Resume API key (input hidden): ' >&2
-  IFS= read -rs key || true
-  echo >&2
-  key="${key//[[:space:]]/}"
-  [ -n "$key" ] || { echo "no key entered; nothing stored" >&2; exit 1; }
-  ( umask 077; mkdir -p "$(dirname "$CONF")"; printf 'RR_API_KEY=%s\n' "$key" > "$CONF" )
-  chmod 600 "$CONF"
-  unset key
-  echo "key      stored in $CONF (mode 600)"
-else
-  echo "key      already stored in $CONF (run with --rekey to replace it)"
-fi
-
-# 3. data folder and templates (never overwrites), then find your Master resume (creating an empty one if none exists)
+# 2. data folder and templates (never overwrites)
 uv run --quiet "$CAREER" init
-uv run --quiet "$CAREER" master --if-unset --create || true
-
-# 4. one-step connection test
 echo "--- career check"
 uv run --quiet "$CAREER" check || true
 echo "---"
-echo "Done. If the old anthropic-skills:career-architect skill is still enabled in the Claude app, disable it so only this one triggers."
+cat <<'NEXT'
+Done. If the old anthropic-skills:career-architect skill is still enabled in the Claude app, disable it so only this one triggers.
+
+Next, one time only: connect the Reactive Resume MCP server (this script cannot do it for you). In Reactive Resume,
+create an API key under Settings > API Keys, then register the server with your client, for example in Claude Code:
+
+  claude mcp add --transport http reactive-resume https://<your-instance>/mcp --header "x-api-key: <your key>"
+
+Then start a jobs session and ask it to call the MCP tool list_resumes to confirm the connection, find (or create)
+your styled "Master" resume, and put its id in profile.md as rr_master. Full detail: jobs/references/local-mode.md.
+NEXT
