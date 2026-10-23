@@ -108,6 +108,16 @@ Sending less: a change to one atom rewrites one role's fragment, not the whole c
 
 Write documents as plain paragraphs: no bold, headings, bullets or tables applied in Docs. `get_document` turns those into markdown marks (`**`, `#`, `-`) and a YAML fragment must read back exactly as it was written. A person who opens a document to look is welcome; if they format one, tell them it will read back with extra marks.
 
+## Large reads
+
+`google_docs__get_document` returns the whole document, and the `skills` index or a facts fragment can run to tens of kilobytes. The server does not truncate and neither should you (see "Read"). Keep the payload out of the conversation instead (`references/delegation.md`):
+
+- Read inside a subagent when the client has one. It passes the text verbatim to the career-architect tool and returns a short digest plus the ids a later write needs: document id, `modifiedTime`, `revision_id`.
+- A subagent never writes. A new version, a `replace_text` or a rebuilt `skills` index is done by the main agent, after the concurrency check above and after showing the person the difference.
+- Never print `markdown_content` or a raw tool result back to the person. Report the changed line, the atom ids that decide an answer, or the verdict.
+- Treat a read as write-once: take what the task needs at once and keep the ids and `modifiedTime`, not the text. Read again when needed.
+- To open less in the first place, use `file_name_contains` and `parent_id` in `google_drive__list_files`, and the `# Roles` table in `skills`.
+
 ## Limits the server enforces
 
 250,000 characters per document, 40 documents and 600,000 characters per call. A tool call that exceeds them fails with the limit named; send fewer fragments (only the cited roles), not a truncated one.
