@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.5.0, server 1.2.0 (2026-10-23)
+
+- **Large reads run in read-only subagents.** Full-payload tool results (20 to 100 KB each: facts fragments, the `skills` index, `list_applications`, `list_resumes`) were filling the conversation. New rule 16 and a "Large reads" section in `SKILL.md` say to hand heavy reads and checks to a subagent where the client has one, to report only what decides the answer, to treat a large read as write-once, and never to echo a raw payload. Without a subagent tool the same rules apply to a single agent that reads one document at a time and distills it at once.
+- **New documents, served by `guide` like the rest:** `references/delegation.md` (when to delegate, how to start a subagent, the rules every subagent follows, the reply contract, oversized results, the no-subagent fallback) and four subagent prompt documents: `references/subagent-facts.md`, `subagent-score.md`, `subagent-lint.md` and `subagent-lookup.md`. A subagent fetches its own prompt by topic, so the prompt text never enters the main conversation.
+- **Subagents never write.** Writes stay with the main agent under the storage protocol. The lint subagent can return the exact `operations` (resume) or `cover_text` (letter) that a write needs.
+- `workflows/score.md`, `resume.md`, `cover.md` and `references/storage.md` point to the above. No tool or server change, so no vMCP re-apply; deploying the server ships the new instructions. The connect plugin is unchanged (its launcher already calls `guide`).
+- Found in trial runs against the live connector: a subagent hand-copying a 15 KB index added a stray line, so the rule is now "copy once, compare line counts"; a full listing of 20 applications was about 100 KB and was saved to a file, so the lookup prompt says how to parse it.
+
 ## 2.4.1, server 1.2.0 (2026-09-29)
 
 - **Documentation only.** The README and connect plugin now say plainly that the hosted deployment described here (Obot, Reactive Resume, the career-architect MCP server) is the author's own personal infrastructure for their own group, not a shared or public service, and that no connect plugin should be built to point at it.
