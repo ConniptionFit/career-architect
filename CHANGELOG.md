@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.5.1, server 1.2.0 (2026-10-23)
+
+- **Subagent prompts tightened after running them against the deployed 2.5.0 connector.** `references/subagent-score.md`: a short `must` years floor or a missing required certification is labelled a dealbreaker (a trial run had called a 3.7-year shortfall against a 5-year floor "soft"); the recommendation is exactly one of the three options; the report states the line-count check for each document sent to `match`. `references/subagent-lookup.md`: no fields, notes or runners-up beyond the listed shape.
+- Instructions only: deploy the server to publish them. No tool change, no vMCP re-apply.
+
 ## 2.5.0, server 1.2.0 (2026-10-23)
 
 - **Large reads run in read-only subagents.** Full-payload tool results (20 to 100 KB each: facts fragments, the `skills` index, `list_applications`, `list_resumes`) were filling the conversation. New rule 16 and a "Large reads" section in `SKILL.md` say to hand heavy reads and checks to a subagent where the client has one, to report only what decides the answer, to treat a large read as write-once, and never to echo a raw payload. Without a subagent tool the same rules apply to a single agent that reads one document at a time and distills it at once.
