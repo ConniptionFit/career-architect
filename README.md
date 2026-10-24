@@ -39,7 +39,7 @@ Google Docs   Google Drive       career-architect    Reactive Resume
 | `connect/` | Template for the one-install plugin (launcher skill + your Jobs connector) that people add in claude.ai, Cowork or Claude Code. |
 | `deploy/update.sh` | One command to deploy a version of the server on the Docker host, and to roll back to a tagged one. |
 | `tests/` | Offline tests: `uv run --python 3.12 --with "mcp==2.2.0" --with pyyaml python -m unittest discover -s tests` |
-| `docs/` | Architecture, operations runbook, security and privacy notes, [how to extend it](docs/EXTENDING.md), and [how to fork it for your own group](docs/FORKING.md). |
+| `docs/` | Architecture, operations runbook, security and privacy notes, [how to extend it](docs/EXTENDING.md), [how to fork it for your own group](docs/FORKING.md), and the optional [response filter](docs/RESPONSE-FILTER.md). |
 | `setup.sh` | Installer for local mode (one person, files on their machine). |
 
 ## Deploying for a group, on your own infrastructure
