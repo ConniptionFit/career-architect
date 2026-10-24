@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased (documentation only)
+
+- **New: `docs/RESPONSE-FILTER.md`.** The optional Obot filter, adapter and Redpanda Connect pipeline that can drop fields nobody asked for: the policy (never truncate, fail open, Jobs reads and checks exempt, no content in logs), how to add the filter in Obot (the custom-filter workaround for the fixed-URL form bug), shadow then enforce, how to turn it off, and the crash-loop an empty filter URL causes for every MCP call. Linked from the README, `ARCHITECTURE.md`, `OPERATIONS.md` and `SECURITY.md`.
+- `OPERATIONS.md`: `/healthz` reports the server version, not the release tag.
+- No server, skill or tool change.
+
 ## 2.5.1, server 1.2.0 (2026-10-23)
 
 - **Subagent prompts tightened after running them against the deployed 2.5.0 connector.** `references/subagent-score.md`: a short `must` years floor or a missing required certification is labelled a dealbreaker (a trial run had called a 3.7-year shortfall against a 5-year floor "soft"); the recommendation is exactly one of the three options; the report states the line-count check for each document sent to `match`. `references/subagent-lookup.md`: no fields, notes or runners-up beyond the listed shape.
