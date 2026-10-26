@@ -45,7 +45,7 @@ from pydantic import Field  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 from starlette.responses import JSONResponse  # noqa: E402
 
-SERVER_VERSION = "1.2.0"
+SERVER_VERSION = "1.2.1"
 log = logging.getLogger("career-mcp")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "WARNING").upper()
 if LOG_LEVEL not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
@@ -241,7 +241,8 @@ def info() -> dict[str, Any]:
 def guide(topic: Annotated[str, Field(description="`start` (default) for the main instructions, or the path of a document the instructions name, for example `workflows/score.md`, `workflows/resume.md`, `references/storage.md`, `references/reactive-resume.md`, `style/voice.md`, `assets/profile.md`. The `.md` is optional.")] = "start") -> dict[str, Any]:
     """Use FIRST, at the start of any task about a job posting, resume, cover letter, application, interview or the person's career records, and again whenever the instructions tell you to read
     another document. Returns the current instructions of the `jobs` skill: the rules that keep every claim traceable to the person's confirmed facts, which tool to call for what, and the
-    storage protocol for their Google Drive. Follow it. It is served live, so it is always the current version. `topic` picks a document; the answer lists every available topic."""
+    storage protocol for their Google Drive. Follow it. Resume, cover letter and tracker work uses this server's own reactive_resume__ tools, never a separate Reactive Resume
+    connector or API. It is served live, so it is always the current version. `topic` picks a document; the answer lists every available topic."""
     key = guide_key(topic)
     if key is None:
         raise ToolError(f"no guide document named {str(topic)[:80]!r}. Available: {', '.join(sorted(GUIDE))}")

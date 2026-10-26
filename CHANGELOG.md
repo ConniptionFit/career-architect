@@ -6,6 +6,12 @@
 - `OPERATIONS.md`: `/healthz` reports the server version, not the release tag.
 - No server, skill or tool change.
 
+## 2.6.0, server 1.2.1 (2026-10-26)
+
+- **Reactive Resume work stays on the Jobs server.** With a standalone Reactive Resume connector installed next to the Jobs connector, the assistant was calling it instead of the Jobs server's `reactive_resume__` tools: the skill wrote bare names (`list_resumes`), which both servers match, and "Modes" told it to fall back to local mode (Reactive Resume's own MCP server) whenever "the Jobs server" was not found, which a client that names the connector "Career Architect" invites. `SKILL.md` now says to find the Jobs server by its `career_architect__guide` tool rather than its name, to route every Reactive Resume call to its `reactive_resume__` tools, and never to use a separate Reactive Resume connector, its REST API or another resume service; local mode is only for a person who asks for it. `references/reactive-resume.md` says the same and to ignore RR's own description hints about tools that are not exposed (`unlock_resume`, the schema resource); `references/troubleshooting.md` has a row for two sets of Reactive Resume tools.
+- The `guide` tool's description (server 1.2.1) and the connect plugin's launcher carry the same one-line rule, so it applies before the instructions are read. Regenerate the connect repository after merging.
+- Deploy the server to publish. No tool added or removed, no vMCP re-apply.
+
 ## 2.5.1, server 1.2.0 (2026-10-23)
 
 - **Subagent prompts tightened after running them against the deployed 2.5.0 connector.** `references/subagent-score.md`: a short `must` years floor or a missing required certification is labelled a dealbreaker (a trial run had called a 3.7-year shortfall against a 5-year floor "soft"); the recommendation is exactly one of the three options; the report states the line-count check for each document sent to `match`. `references/subagent-lookup.md`: no fields, notes or runners-up beyond the listed shape.

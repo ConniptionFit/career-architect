@@ -13,5 +13,6 @@ metadata:
 This is a launcher. The instructions, the rules and every workflow are served live by the Jobs connector, so they are always the current version and nothing in this file can go stale.
 
 1. Call the `guide` tool of the Jobs connector with no arguments (it is `career_architect__guide`; your client may show a prefix before that name, and may load tools on demand, so load it first). Follow what it returns.
-2. When the instructions say to read a document such as `references/storage.md` or `workflows/score.md`, call `guide` again with that path as `topic`.
-3. If there is no `guide` tool, the Jobs connector is not connected. Tell the person to open the Jobs connector (the plugin's Connectors tab) and connect it, sign in, and authorise Google and Reactive Resume when asked. Do not write a resume, letter or score without the instructions: a document nobody checked is what this assistant exists to prevent.
+2. Do all of this work through the Jobs connector's own tools, including resumes, cover letters and the application tracker in Reactive Resume. Never use a separate Reactive Resume connector, its API, or another resume service, even if one is installed: they skip the checks.
+3. When the instructions say to read a document such as `references/storage.md` or `workflows/score.md`, call `guide` again with that path as `topic`.
+4. If there is no `guide` tool, the Jobs connector is not connected. Tell the person to open the Jobs connector (the plugin's Connectors tab) and connect it, sign in, and authorise Google and Reactive Resume when asked. Do not write a resume, letter or score without the instructions: a document nobody checked is what this assistant exists to prevent.
