@@ -27,7 +27,7 @@ AI/                                folder, fixed: the same top-level name in eve
       profile                      YAML front matter + notes (identity, never_claim, known_gaps, pending, RR Master id)
       rules                        standing wording rules (years framing, titles, voice, scope limits)
       skills                       GENERATED index from build_index; never edited by hand
-      facts - shared               aliases, credentials, education, log
+      facts - shared               aliases, related, credentials, education, log
       facts - <role-id>            one document per role: its atoms (role id = the `id` field, kebab-case)
       jobs/                        folder
         <slug>/                    folder per posting (slug = company-role, kebab-case)
@@ -37,7 +37,7 @@ AI/                                folder, fixed: the same top-level name in eve
       _history/                    folder; superseded versions of any document, never deleted by this skill
 ```
 
-Why one document per role: a whole career runs to tens of kilobytes, and a resume needs two or three roles. The `skills` index carries what scoring and linting need (years, depth, evidence atom ids, aliases, credentials, career length) plus a `# Roles` table saying which role holds which atom, so a task opens only the fragments it cites.
+Why one document per role: a whole career runs to tens of kilobytes, and a resume needs two or three roles. The `skills` index carries what scoring and linting need (years, depth, evidence atom ids, aliases, related tools, credentials, career length) plus a `# Roles` table saying which role holds which atom, so a task opens only the fragments it cites.
 
 Every document is a Google Doc holding plain text. Titles are exact and case-sensitive.
 

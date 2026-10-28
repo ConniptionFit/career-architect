@@ -6,6 +6,21 @@
 - `OPERATIONS.md`: `/healthz` reports the server version, not the release tag.
 - No server, skill or tool change.
 
+## 2.7.0, server 1.3.0 (2026-10-28)
+
+- **Scores no longer run low by construction.** Replaying two real postings against a current index gave 4/10 for roles the person fits. The causes were in the rules, not the records, so this release changes the rules and keeps every point traceable to an atom.
+- **Nice-to-haves only add.** `match` (`career.ceiling`) now gives 8 with every must-have met, 9 with about 40% of the extras covered and 10 with 75%. Partial credit counts half. Missing extras used to cap a full must-have match at 7. Must-have rules are unchanged: one gap caps the score at 6, and a dealbreaker or two gaps cap it at 4.
+- **New status `adjacent`.** A requirement with no evidence of its own, but hands-on evidence for a tool that does the same job, is now `adjacent` instead of `unasked`. Examples are Kandji with Jamf evidence, or Pulumi with Terraform evidence. It scores as partial, appears in `ask`, and its evidence column names the tool actually used. It is never claimed, and `never_claim` and `known_gaps` still win. Adjacency comes from built-in peer groups (`career.PEERS`) plus an optional `related:` map in `facts - shared`, which `build_index` writes to the index as `# Related`.
+- **Ask before scoring.** `workflows/score.md` and `references/subagent-score.md` show **Score N to M, pending K answers** with the questions first whenever a must-have is open. Previously the worst case was presented as the score.
+- **Requirement tagging rules** (`score.md` step 2, `references/tools.md`):
+  - Map to existing tags and aliases first.
+  - Mark "helpful / not required / or equivalent experience" as `nice`.
+  - Use one requirement per posting bullet, with about 12 must-haves at most.
+  - Treat "such as A, B or C" as one requirement.
+  - Leave out generic qualities that records cannot show. Every mapping is listed under `assumptions`.
+- **Fit line, strengths and tiers.** The answer adds a fit line covering work model and location, pay against the floor, and level against target roles. A work model the person cannot do, or a requirement on `never_claim`, is a dealbreaker. It also lists up to three atom-backed strengths the posting stresses, and a tier label (strong match, good match, stretch, poor fit). The fit line, strengths and tier labels are adapted from a weighted rubric; the rubric's judged point ranges were not adopted.
+- Deploy the server to publish. The tool list is unchanged, so no vMCP re-apply is needed. Rebuild a person's index only if they add a `related:` map.
+
 ## 2.6.0, server 1.2.1 (2026-10-26)
 
 - **Reactive Resume work stays on the Jobs server.** With a standalone Reactive Resume connector installed next to the Jobs connector, the assistant was calling it instead of the Jobs server's `reactive_resume__` tools: the skill wrote bare names (`list_resumes`), which both servers match, and "Modes" told it to fall back to local mode (Reactive Resume's own MCP server) whenever "the Jobs server" was not found, which a client that names the connector "Career Architect" invites. `SKILL.md` now says to find the Jobs server by its `career_architect__guide` tool rather than its name, to route every Reactive Resume call to its `reactive_resume__` tools, and never to use a separate Reactive Resume connector, its REST API or another resume service; local mode is only for a person who asks for it. `references/reactive-resume.md` says the same and to ignore RR's own description hints about tools that are not exposed (`unlock_resume`, the schema resource); `references/troubleshooting.md` has a row for two sets of Reactive Resume tools.

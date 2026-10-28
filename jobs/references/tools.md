@@ -12,7 +12,7 @@ The `career_architect__*` tools of the Jobs toolset (names below are the bare to
 | `guide` | read the skill's own documents from the server, so no local copy is needed and the version is always current | optional `topic` (`start`, or a document path such as `workflows/score.md` or `references/storage.md`; the `.md` is optional) | `text`, `skill_version`, `topics` |
 | `normalize_text` | get clean, editable text from a document you read, before you edit it yourself | `text`, optional `source` (`docs` for Google Docs, `auto`, `drive_read`, `base64`, `plain`) | `text` |
 | `build_index` | validate facts and generate the `skills` document | `facts_docs` (all fragments) | `ok`, `skills_md`, counts; or `errors` |
-| `match` | score a posting's requirements | `skills_md`, `profile_md`, `requirements` | `table`, `ceiling`, `ceiling_if_every_unasked_is_met`, `rows`, `ask` |
+| `match` | score a posting's requirements | `skills_md`, `profile_md`, `requirements` | `table`, `ceiling`, `ceiling_if_every_unasked_is_met`, `rows` (status `met`, `partial`, `short`, `adjacent`, `gap` or `unasked`), `ask` |
 | `lint_resume` | check a resume selection | `selection_yaml`, `skills_md`, `profile_md`, `facts_docs` | issues, `resume_text` |
 | `lint_cover` | check a cover letter | `cover_yaml`, `skills_md`, `profile_md`, `facts_docs`, `posting_text` | issues, `cover_text`, `recipient_html`, `content_html`, `name` |
 | `resume_patch` | turn a clean selection into Reactive Resume operations | the `lint_resume` inputs, optional `master_json` | `operations`, `resume_name` (at most 64 characters), `resume_name_full`, `resume_slug`, `resume_text`; no operations while there are errors |
@@ -22,7 +22,14 @@ Errors that are the caller's to fix come back as a plain message (a field named,
 
 ## Requirements string for `match`
 
-`tag[:must|nice[:min_years]]`, comma separated, for example `okta:must:5,jamf:must,terraform:nice`. Use the tag names in `skills`; aliases resolve. "Required, must have, X+ years" is `must`; "preferred, nice to have, bonus" is `nice`. Include checkable soft requirements (people management, a compliance framework, a clearance, a degree, a certification).
+`tag[:must|nice[:min_years]]`, comma separated, for example `okta:must:5,jamf:must,terraform:nice`. A missing level is `must`, so always write it.
+
+- Use the tag names in `skills`; aliases resolve. A tag the index does not have can only come back `unasked`, so map "identity providers" to the person's IdP tag and "lifecycle automation" to their lifecycle tag before inventing a name.
+- "Required, must have, X+ years", and the bullets under "you have / what you bring", are `must`. "Preferred, nice to have, bonus, helpful, not required" are `nice`. "X+ years or equivalent experience" is `nice` with the years.
+- One requirement per posting bullet, about 12 musts at most. "Such as A, B or C" is one requirement: the listed one the person has, or the first.
+- Include checkable soft requirements (people management, a compliance framework, a clearance, a degree, a certification). Leave out qualities records cannot show (communication, judgment, problem solving, testing).
+
+How `match` scores: must-haves gate the ceiling, nice-to-haves only add to it (all musts met is 8, 9 or 10 by how many extras are covered). `adjacent` means no evidence for the tag itself but hands-on evidence for a tool that does the same job (Kandji for Jamf, Tines for Okta Workflows), from built-in peer groups plus the person's `related` map in `facts - shared`. It scores as partial, is listed in `ask`, and is never claimed. `never_claim` and `known_gaps` always win over it.
 
 ## Selection document (`selection`)
 

@@ -92,6 +92,48 @@ class SkillsAndMatch(Base):
         _, out, _ = run(self.data, "match", "--req", "okta:must,soc2:must")
         self.assertIn("ceiling: 6 (up to 10", out)
 
+    def test_nice_to_haves_add_to_the_score_and_never_cap_a_full_must_match_at_seven(self):
+        # Three missing extras used to cap this at 7. Must-haves met, so the floor is 8.
+        _, out, _ = run(self.data, "match", "--req", "okta:must,terraform:nice,kubernetes:nice,vdi:nice")
+        self.assertIn("ceiling: 8", out)
+        _, out, _ = run(self.data, "match", "--req", "okta:must,macos:nice,support:nice,vdi:nice")
+        self.assertIn("ceiling: 9", out)                   # two of three extras met
+        _, out, _ = run(self.data, "match", "--req", "okta:must,macos:nice,support:nice,windows:nice,vdi:nice")
+        self.assertIn("ceiling: 10", out)                  # three of four
+
+    def test_a_peer_tool_is_adjacent_evidence_not_a_match(self):
+        _, out, _ = run(self.data, "match", "--req", "kandji:must,okta:must")
+        rows = {l.split("|")[0]: l.split("|") for l in out.splitlines() if "|" in l}
+        self.assertEqual(rows["kandji"][2], "adjacent")
+        self.assertIn("nw-01", rows["kandji"][5])         # the Jamf atom that backs it
+        self.assertIn("Not kandji itself", rows["kandji"][5])
+        self.assertIn("ceiling: 8 (up to 10", out)         # scored as partial until the person confirms
+
+    def test_known_gaps_and_never_claim_beat_adjacent_evidence(self):
+        p = self.data / "facts.md"
+        p.write_text(p.read_text().replace("aliases:", "related:\n  kubernetes: [okta]\n  terraform: [okta]\naliases:", 1))
+        _, out, _ = run(self.data, "match", "--req", "kubernetes:must,terraform:must")
+        rows = {l.split("|")[0]: l.split("|") for l in out.splitlines() if "|" in l}
+        self.assertEqual(rows["kubernetes"][2], "gap")
+        self.assertEqual(rows["terraform"][2], "gap")
+
+    def test_exposure_is_not_adjacent_evidence(self):
+        p = self.data / "facts.md"
+        p.write_text(p.read_text().replace("aliases:", "related:\n  citrix: [workspace-one]\naliases:", 1))
+        _, out, _ = run(self.data, "match", "--req", "citrix:must")
+        self.assertIn("|unasked|", out)
+
+    def test_the_persons_related_map_travels_in_the_index(self):
+        p = self.data / "facts.md"
+        p.write_text(p.read_text().replace("aliases:", "related:\n  zero-trust: [okta, mdm]\naliases:", 1))
+        self.assertEqual(run(self.data, "skills")[0], 0)
+        text = (self.data / "skills.md").read_text()
+        self.assertIn("# Related\nzero-trust: okta, mdm", text)
+        parsed = career.parse_skills_md(text)
+        rows, strict, lenient, _ = career.match_table(parsed["idx"], parsed["amap"], {}, parsed["pending"], "zero-trust:must", parsed["related"])
+        self.assertEqual(rows[0]["status"], "adjacent")
+        self.assertEqual((strict, lenient), (8, 10))
+
     def test_select_ranks_and_excludes_unusable(self):
         _, out, _ = run(self.data, "select", "--tags", "okta,automation")
         self.assertLess(out.index("nw-02"), out.index("nw-05"))
