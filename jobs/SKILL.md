@@ -5,7 +5,7 @@ license: MIT
 compatibility: Needs the Jobs MCP server (a client may name it Career Architect), one endpoint bundling Career Architect (checks), Reactive Resume (resumes, letters, tracker), Google Drive and Google Docs (records). All Reactive Resume work uses its reactive_resume__ tools, never a separate Reactive Resume connector or API. Local maintainer mode, only when the person asks for it, needs uv, Python 3.10 or newer, and Reactive Resume's own MCP server (references/local-mode.md).
 metadata:
   author: ConniptionFit
-  version: "2.6.0"
+  version: "2.7.0"
   mcp-server: Jobs
 ---
 
@@ -79,7 +79,7 @@ Each rule exists because a claim that fails a follow-up question costs the perso
 4. **Not in the index is not the same as a gap.** Ask the person; record the answer as an atom (or in `known_gaps`, or under `pending` in `profile` when they have not said which job), then rebuild the index.
 5. **Fix facts at the source.** A correction goes into the role's facts fragment once and applies to every future document. Never patch it inside one resume.
 6. **Change only what changed.** Edit one line and republish. No regenerating whole documents, no `v2` copies (RR keeps history).
-7. Score strictly and take the ceiling from `match`. A candid 5 beats a flattering 8.
+7. Score strictly and take the ceiling from `match`; when a must-have is still an open question, show the range and ask first. A candid 5 beats a flattering 8.
 8. **Secrets stay out of the conversation.** Access to Google and Reactive Resume is through the person's own accounts, signed in on the Jobs server. Never ask for, print or store a password, API key or token.
 9. Prefer tables and one-line answers. Give the long narrative only when asked.
 10. **One row per position.** Before creating or changing an application, look for the existing row. Treat it as context to bring up to date, not as a source of truth. Pay is "confirmed" only when a posting states it.

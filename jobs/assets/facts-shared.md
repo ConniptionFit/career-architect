@@ -5,6 +5,10 @@
 aliases: {}
 #  okta: [idp, sso]
 #  jamf: [jamf-pro]
+# related: tools whose hands-on evidence is adjacent to a skill you do not have yourself. Scoring shows it as "adjacent",
+# never as met, and nothing is claimed from it. Common peer tools (Jamf/Kandji/Intune, Okta/Entra, ...) are built in.
+related: {}
+#  zero-trust: [conditional-access, device-trust]
 
 # credentials: certifications and licences (used for scoring and printed on resumes).
 # `name` is the FULL official name, one line each, never abbreviated or merged, so applicant systems parse it.

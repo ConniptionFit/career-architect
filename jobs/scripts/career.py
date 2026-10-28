@@ -166,18 +166,18 @@ def normalize_drive_text(text: str, source: str = "auto") -> str:
 
 
 def merge_facts(docs) -> dict:
-    """One facts dict from several fragments: the layout kept in Drive is a shared document (aliases, credentials, education)
-    plus one document per role, each a valid slice of the usual facts YAML. Lists are concatenated and alias lists are
-    unioned. A role or atom id that occurs twice is reported by `validate`, not silently merged."""
-    out: dict = {"aliases": {}, "credentials": [], "education": [], "roles": [], "log": []}
+    """One facts dict from several fragments: the layout kept in Drive is a shared document (aliases, related, credentials,
+    education) plus one document per role, each a valid slice of the usual facts YAML. Lists are concatenated and alias and
+    related lists are unioned. A role or atom id that occurs twice is reported by `validate`, not silently merged."""
+    out: dict = {"aliases": {}, "related": {}, "credentials": [], "education": [], "roles": [], "log": []}
     for doc in docs:
         d = parse_block(doc) if isinstance(doc, str) else (doc or {})
         if not isinstance(d, dict):
             raise ValueError("a facts document must be a YAML mapping (aliases, credentials, education, roles, log)")
         for key, val in d.items():
-            if key == "aliases":
+            if key in ("aliases", "related"):
                 for tag, syns in (val or {}).items():
-                    have = out["aliases"].setdefault(tag, [])
+                    have = out[key].setdefault(tag, [])
                     have += [s for s in (syns or []) if s not in have]
             elif key in ("credentials", "education", "roles", "log"):
                 out[key] += val or []
@@ -243,6 +243,35 @@ def alias_map(facts: dict) -> dict:
 def canon(tag, amap: dict) -> str:
     n = norm(tag)
     return amap.get(n, n)
+
+
+# Tools that do the same job, so hands-on work with one is adjacent evidence for another: it never counts as the skill
+# itself and is never claimed, it only keeps a translatable gap from scoring like a missing one. A person's own `related`
+# map (facts - shared) adds to these.
+PEERS = [
+    ["jamf", "kandji", "mosyle", "intune", "workspace-one", "hexnode", "meraki-systems-manager", "addigy"],
+    ["okta", "entra-id", "onelogin", "jumpcloud", "ping-identity", "google-workspace"],
+    ["okta-workflows", "tines", "workato", "zapier", "n8n", "power-automate", "make"],
+    ["servicenow", "jira-service-management", "freshservice", "zendesk"],
+    ["sailpoint", "okta-identity-governance", "lumos", "conductorone", "saviynt"],
+    ["terraform", "opentofu", "pulumi", "cloudformation"],
+    ["n-able", "ninjaone", "connectwise", "kaseya", "datto-rmm"],
+    ["aws", "gcp", "azure"],
+    ["crowdstrike", "sentinelone", "carbon-black", "microsoft-defender"],
+    ["1password", "lastpass", "bitwarden", "keeper"],
+]
+
+
+def related_map(related: dict | None, amap: dict) -> dict:
+    """canonical tag -> set of canonical tags whose evidence is adjacent to it: the built-in peer groups plus the person's map."""
+    out: dict = {}
+    for group in PEERS:
+        tags = {canon(t, amap) for t in group}
+        for t in tags:
+            out.setdefault(t, set()).update(tags - {t})
+    for key, vals in (related or {}).items():
+        out.setdefault(canon(key, amap), set()).update(canon(v, amap) for v in vals or [] if canon(v, amap) != canon(key, amap))
+    return out
 
 
 def month_index(x: str, today: dt.date) -> int:
@@ -376,6 +405,9 @@ def render_skills_md(facts: dict, today: dt.date) -> str:
     aliases = {k: v for k, v in (facts.get("aliases") or {}).items() if v}
     if aliases:
         out += ["", "# Aliases"] + [f"{k}: {', '.join(str(s) for s in v)}" for k, v in aliases.items()]
+    related = {k: v for k, v in (facts.get("related") or {}).items() if v}
+    if related:
+        out += ["", "# Related"] + [f"{k}: {', '.join(str(s) for s in v)}" for k, v in related.items()]
     pending = pending_from_facts(facts, alias_map(facts))
     if pending:
         out += ["", "# Pending"] + [f"{t}: {'; '.join(v)}" for t, v in sorted(pending.items())]
@@ -394,6 +426,7 @@ def parse_skills_md(text: str) -> dict:
     without ever receiving the facts. Older indexes (no evidence column, no aliases) still parse."""
     idx: dict = {}
     aliases: dict = {}
+    related: dict = {}
     pending: dict = {}
     roles: list = []
     months = None
@@ -418,10 +451,10 @@ def parse_skills_md(text: str) -> dict:
                 evidence = ["(atom)"] * min(count, 3)
             idx[tag] = {"iv": [], "depth": DEPTH.get(depth, 0), "atoms": evidence, "end": 0,
                         "years": float(f[1]), "last": f[2], "cred": depth == "cert"}
-        elif section in ("aliases", "pending"):
+        elif section in ("aliases", "related", "pending"):
             key, _, val = line.partition(":")
-            if section == "aliases":
-                aliases[key.strip()] = [s.strip() for s in val.split(",") if s.strip()]
+            if section in ("aliases", "related"):
+                (aliases if section == "aliases" else related)[key.strip()] = [s.strip() for s in val.split(",") if s.strip()]
             else:
                 pending[key.strip()] = [s.strip() for s in val.split(";") if s.strip()]
         elif section == "roles":
@@ -430,7 +463,8 @@ def parse_skills_md(text: str) -> dict:
                 roles.append({"id": f[0], "title": f[1], "org": f[2], "span": f[3], "atoms": f[4].split()})
         elif section == "career" and line.startswith("career_months:"):
             months = int(line.partition(":")[2])
-    return {"idx": idx, "aliases": aliases, "amap": alias_map({"aliases": aliases}), "pending": pending, "career_months": months, "roles": roles}
+    return {"idx": idx, "aliases": aliases, "related": related, "amap": alias_map({"aliases": aliases}), "pending": pending,
+            "career_months": months, "roles": roles}
 
 
 def cmd_skills(ctx: Ctx, args):
@@ -459,7 +493,7 @@ def parse_reqs(s: str):
     return out
 
 
-def req_status(tag, minyrs, idx, amap, never, gaps, pending=None):
+def req_status(tag, minyrs, idx, amap, never, gaps, pending=None, related=None):
     c = canon(tag, amap)
     if c in never:
         return "gap", "-", "-", "never_claim"
@@ -479,13 +513,24 @@ def req_status(tag, minyrs, idx, amap, never, gaps, pending=None):
         return "gap", "-", "-", "known gap"
     if pending and c in pending:
         return "unasked", "-", "-", f"unverified: {'; '.join(pending[c][:2])}. Ask the candidate to confirm"
+    near = sorted((t for t in (related or {}).get(c, ()) if t in idx and idx[t]["atoms"] and idx[t]["depth"] > 0),
+                  key=lambda t: -idx[t]["years"])
+    if near:
+        best = idx[near[0]]
+        ev = "; ".join(f"{t} ({','.join(idx[t]['atoms'][:2])})" for t in near[:2])
+        return "adjacent", f"{best['years']:g}", DEPTH_NAME[best["depth"]], f"adjacent: {ev}. Not {c} itself: ask whether they used it directly"
     return "unasked", "-", "-", "not in facts or known_gaps: ask the candidate"
 
 
 def ceiling(rows, unasked_as: str) -> int:
-    """Rule-based score cap; keeps the rubric semantics (1-10, strict)."""
+    """Rule-based score cap (1-10). Must-haves gate it; nice-to-haves only add to it, the way a posting's "bonus" list is
+    meant. Adjacent evidence scores as partial, or as met when every open question is assumed answered yes."""
     def st(r):
-        return unasked_as if r["status"] == "unasked" else r["status"]
+        if r["status"] == "unasked":
+            return unasked_as
+        if r["status"] == "adjacent":
+            return "met" if unasked_as == "met" else "partial"
+        return r["status"]
     musts = [r for r in rows if r["lvl"] == "must"]
     nices = [r for r in rows if r["lvl"] == "nice"]
     gap = sum(1 for r in musts if st(r) == "gap")
@@ -497,10 +542,11 @@ def ceiling(rows, unasked_as: str) -> int:
         return 4
     if gap == 1:
         return 6
-    nice_missing = sum(1 for r in nices if st(r) != "met")
+    # Share of nice-to-haves covered: met counts 1, partial (exposure, short years, adjacent) counts half. None listed = full.
+    share = sum({"met": 1, "partial": 0.5, "short": 0.5}.get(st(r), 0) for r in nices) / len(nices) if nices else 1
     if part:
-        return 8 if part + nice_missing <= 2 else 7
-    return {0: 10, 1: 9, 2: 8}.get(nice_missing, 7)
+        return 8 if part == 1 and share >= 0.5 else 7
+    return 10 if share >= 0.75 else 9 if share >= 0.4 else 8
 
 
 def note_if_empty(ctx: Ctx):
@@ -508,7 +554,7 @@ def note_if_empty(ctx: Ctx):
         print("note: facts.md has no roles yet, so nothing can be scored or selected. Run the intake workflow first (workflows/intake.md).", file=sys.stderr)
 
 
-def match_table(idx: dict, amap: dict, profile: dict, pending: dict, req: str):
+def match_table(idx: dict, amap: dict, profile: dict, pending: dict, req: str, related: dict | None = None):
     """Score a requirement list against a skills index: (rows, strict ceiling, lenient ceiling, printable table).
     Shared by the CLI (index built from facts.md) and the hosted service (index parsed from skills.md)."""
     never = {canon(x, amap) for x in profile.get("never_claim") or []}
@@ -516,14 +562,15 @@ def match_table(idx: dict, amap: dict, profile: dict, pending: dict, req: str):
     pending = {k: list(v) for k, v in pending.items()}
     for tag, note in (profile.get("pending") or {}).items():  # things the person said but has not yet tied to a job
         pending.setdefault(canon(tag, amap), []).append(str(note).rstrip(". "))
+    near = related_map(related, amap)
     rows = []
     for tag, lvl, yrs in parse_reqs(req):
-        st, y, d, ev = req_status(tag, yrs, idx, amap, never, gaps, pending)
+        st, y, d, ev = req_status(tag, yrs, idx, amap, never, gaps, pending, near)
         rows.append({"tag": tag, "lvl": lvl, "status": st, "yrs": y, "depth": d, "ev": ev})
     strict, lenient = ceiling(rows, "gap"), ceiling(rows, "met")
     line = f"ceiling: {strict}"
     if strict != lenient:
-        line += f" (up to {lenient} if every 'unasked' turns out to be met)"
+        line += f" (up to {lenient} if every 'unasked' or 'adjacent' turns out to be met)"
     lines = ["req|lvl|status|yrs|depth|evidence"]
     lines += [f"{r['tag']}|{r['lvl']}|{r['status']}|{r['yrs']}|{r['depth']}|{r['ev']}" for r in rows]
     lines.append(line + "  -> final score is the ceiling or one point below, with a stated reason")
@@ -533,7 +580,8 @@ def match_table(idx: dict, amap: dict, profile: dict, pending: dict, req: str):
 def cmd_match(ctx: Ctx, args):
     note_if_empty(ctx)
     amap = alias_map(ctx.facts)
-    _, _, _, table = match_table(build_index(ctx.facts, ctx.today), amap, ctx.profile, pending_from_facts(ctx.facts, amap), args.req)
+    _, _, _, table = match_table(build_index(ctx.facts, ctx.today), amap, ctx.profile, pending_from_facts(ctx.facts, amap), args.req,
+                                 ctx.facts.get("related"))
     print(table)
     return 0
 

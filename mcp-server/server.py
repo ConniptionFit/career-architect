@@ -45,7 +45,7 @@ from pydantic import Field  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 from starlette.responses import JSONResponse  # noqa: E402
 
-SERVER_VERSION = "1.2.1"
+SERVER_VERSION = "1.3.0"
 log = logging.getLogger("career-mcp")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "WARNING").upper()
 if LOG_LEVEL not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
@@ -289,16 +289,18 @@ def match(
     requirements: Annotated[str, Field(description="tag[:must|nice[:min_years]],... e.g. okta:must:5,terraform:nice. Use the tag names in skills_md; aliases resolve.")],
 ) -> dict[str, Any]:
     """Use to score how well a job posting fits the person, before any resume or letter. Coverage table and score ceiling for a list of the posting's requirements, from the skills index
-    and the profile's never_claim / known_gaps. The final score is the ceiling or one point below with a stated reason, never above. Lists requirements the person has not been asked about (`ask`)."""
+    and the profile's never_claim / known_gaps. Must-haves gate the ceiling; nice-to-haves only add to it. A requirement with no evidence of its own but hands-on
+    evidence for a tool doing the same job is `adjacent` (scored as partial, never claimed). The final score is the ceiling or one point below with a stated reason,
+    never above. Lists requirements to ask the person about (`ask`: unasked and adjacent)."""
     parsed = _index(_text("skills_md", skills_md))
     profile = _profile(_text("profile_md", profile_md))
     reqs = _text("requirements", requirements)
     if not career.parse_reqs(reqs):
         raise ToolError("requirements is empty")
-    rows, strict, lenient, table = career.match_table(parsed["idx"], parsed["amap"], profile, parsed["pending"], reqs)
+    rows, strict, lenient, table = career.match_table(parsed["idx"], parsed["amap"], profile, parsed["pending"], reqs, parsed["related"])
     return {"table": table, "ceiling": strict, "ceiling_if_every_unasked_is_met": lenient,
             "rows": [{"requirement": r["tag"], "level": r["lvl"], "status": r["status"], "years": r["yrs"], "depth": r["depth"], "evidence": r["ev"]} for r in rows],
-            "ask": [r["tag"] for r in rows if r["status"] == "unasked"]}
+            "ask": [r["tag"] for r in rows if r["status"] in ("unasked", "adjacent")]}
 
 
 @server.tool(title="Lint a resume selection", annotations=READ_ONLY)

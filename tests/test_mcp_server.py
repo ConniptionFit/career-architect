@@ -163,6 +163,13 @@ class Tools(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out["ask"], ["soc2"])
         self.assertIn("nw-06 (unconfirmed)", out["table"])
 
+    async def test_adjacent_evidence_is_asked_about_and_scored_as_partial(self):
+        skills = await self.index()
+        out = await self.ok("match", skills_md=drive_render(skills), profile_md=drive_render(PROFILE), requirements="kandji:must,okta:must")
+        self.assertEqual(out["rows"][0]["status"], "adjacent")
+        self.assertEqual(out["ask"], ["kandji"])
+        self.assertEqual((out["ceiling"], out["ceiling_if_every_unasked_is_met"]), (8, 10))
+
     async def test_match_needs_a_real_index_and_requirements(self):
         self.assertIn("skills table", await self.fails("match", skills_md="nothing useful", profile_md=PROFILE, requirements="okta:must"))
         skills = await self.index()
