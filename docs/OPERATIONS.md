@@ -158,7 +158,7 @@ docker compose --env-file <env-file> up -d
 ## 9. Monitoring and troubleshooting
 - Health: `/healthz` (unauthenticated, returns the version only). The container healthcheck uses it; the `autoheal` label restarts an unhealthy one where that helper runs.
 - Logs are quiet by design (WARNING). A tool crash logs the tool name and exception type; a rejected request logs its path and whether a token header was present, never the token; user text is never logged. `LOG_LEVEL` (default `WARNING`) is read at start, and INFO logs tool error messages, which can quote a document's parser errors, so leave it at WARNING outside debugging.
-- `/healthz` reports the **server** version (`1.2.0`), not the release tag; `git -C src describe --tags` gives the release, after `git -C src fetch --tags` (the update script fetches them).
+- `/healthz` reports the **server** version (`1.2.1`), not the release tag; `git -C src describe --tags` gives the release, after `git -C src fetch --tags` (the update script fetches them).
 - **Every MCP call fails with `failed to run hook ... container repeatedly crashed`**: an Obot filter is broken (typically saved with an empty URL), and Obot runs filters on every call. Disable or delete it; see [RESPONSE-FILTER.md](RESPONSE-FILTER.md).
 - An optional response filter (Obot filter, adapter, Redpanda Connect) and its rules are in [RESPONSE-FILTER.md](RESPONSE-FILTER.md).
 - User-facing symptoms and fixes: `jobs/references/troubleshooting.md`.

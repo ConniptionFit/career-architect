@@ -2,10 +2,10 @@
 name: jobs
 description: Career assistant that scores job postings against a person's verified work history, writes tailored resumes and cover letters that claim nothing their records do not support, prepares interviews, researches applications and keeps the application tracker. Each person's qualifications live in their own Google Drive, in a folder named after them under `AI/JobSearch`; resumes, cover letters and the tracker live in Reactive Resume. Use it for anything about a job posting, resume, cover letter, application, interview or job-search research, and for first-time setup of a person's career records.
 license: MIT
-compatibility: Needs the Jobs MCP server, one endpoint that bundles Career Architect (checks and builders), Reactive Resume (resumes, cover letters, application tracker), Google Drive and Google Docs (the person's records). Local maintainer mode instead needs uv, Python 3.10 or newer, and Reactive Resume's own MCP server connected in the client (references/local-mode.md); it never uses a Reactive Resume API key or address.
+compatibility: Needs the Jobs MCP server (a client may name it Career Architect), one endpoint bundling Career Architect (checks), Reactive Resume (resumes, letters, tracker), Google Drive and Google Docs (records). All Reactive Resume work uses its reactive_resume__ tools, never a separate Reactive Resume connector or API. Local maintainer mode, only when the person asks for it, needs uv, Python 3.10 or newer, and Reactive Resume's own MCP server (references/local-mode.md).
 metadata:
   author: ConniptionFit
-  version: "2.5.1"
+  version: "2.6.0"
   mcp-server: Jobs
 ---
 
@@ -16,6 +16,8 @@ A person's career is kept as small structured facts (atoms), not prose. Scoring,
 ## The Jobs server
 
 Everything this skill does goes through one MCP server, **Jobs**, which bundles four sources. Each tool is named `<source>__<tool>`, so `google_docs__get_document` is the `get_document` tool of Google Docs. A client may add its own prefix in front (for example `mcp__jobs__`); match on the `<source>__<tool>` part. Some clients load tools on demand: load the ones a task needs before the first call.
+
+**Find the Jobs server by its tools, not its name.** A client may list it as "Jobs", "Career Architect" or the plugin's name. It is the server that has `career_architect__guide`. Every call this skill makes goes to that one server, including every Reactive Resume call: use its `reactive_resume__` tools and nothing else for resumes, PDFs, saved cover letters and the tracker. A client can also have a separate Reactive Resume connector (tools such as `list_resumes` with no `reactive_resume__` in front, under another server), Reactive Resume's REST API, or another resume service (Workopia, Indeed, Composio and the like). Never use any of them for this skill's work, even when the name matches: they skip the allowlist and the atoms checks, and can act on a different account. If the Jobs server's `reactive_resume__` tools are missing or fail, say so and stop (`references/troubleshooting.md`); do not fall back to another one.
 
 This file and every document it names are also served live by the Jobs server: where the skill says to read `references/storage.md` or `workflows/score.md`, a client that has no copy of the skill folder calls `career_architect__guide` with that path as `topic` (`start` returns this file). Use the file when you have it and the tool when you do not.
 
@@ -90,4 +92,4 @@ Each rule exists because a claim that fails a follow-up question costs the perso
 
 ## Modes
 
-Hosted mode (this file) is the default. Local mode, for one person working from a folder on their machine with the `career` script, is in `references/local-mode.md`. Use it when the person says they are working locally, or when the Jobs server is not connected and a local data folder exists (say which mode you are in). The rules above apply in both.
+Hosted mode (this file) is the default. Local mode, for one person working from a folder on their machine with the `career` script, is in `references/local-mode.md`. Use it only when the person says they are working locally (say which mode you are in). A Jobs server that is missing or failing is not a reason to switch: say so and stop. Local mode is the only mode that uses a Reactive Resume connector of its own. The rules above apply in both.
