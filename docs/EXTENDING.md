@@ -37,6 +37,14 @@ A tool is a pure function of the text it is given: no files, no network (except 
 3. Add the tool name to `enabled` under Career Architect in `deploy/jobs-vmcp.json` and a row in `jobs/references/tools.md`.
 4. Bump `SERVER_VERSION`, add a line to `CHANGELOG.md`, rebuild the container (`docs/OPERATIONS.md`, section 7), and run `deploy/apply-jobs-vmcp.js` (a new tool on a server is disabled until the spec enables it).
 
+## Add a prompt or a resource to the career-architect server
+
+Prompts (`/` commands) and resources (`@` mentions) live in `mcp-server/server.py` under their own headings.
+
+- **A prompt** is a request with blanks that the person runs. Add a function with `@server.prompt(name=..., title=...)`; its parameters are the arguments (give each an `Annotated[str, Field(description=...)]`, with a default when optional) and it returns the request text built with `_brief(...)`, which names the guide documents to follow. Keep arguments to single words (a slug, a URL, a number) and check them with `_arg` or a fixed list; refuse a bad one with `MCPError(INVALID_PARAMS, ...)`. A prompt only words a request: anything that reads or writes a record is done by the tools afterwards.
+- **A resource** is read-only data at a URI. The server holds nothing per person, so it can only serve what is in the image (today, the guide documents). A person's records stay behind the Reactive Resume and Drive tools.
+- Test both in `tests/test_mcp_server.py` (`ResourcesAndPrompts`), bump `SERVER_VERSION`, add a `CHANGELOG.md` line and deploy. No vMCP re-apply: the allowlist covers tools only.
+
 ## Add another MCP server to the Jobs vMCP
 
 The Jobs vMCP is meant to grow: it is one endpoint, so a person who has it gets new sources without connecting anything new. The order matters, because each step is what makes the next one safe.

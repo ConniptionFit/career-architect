@@ -33,7 +33,7 @@ docker compose ps                                     # healthy
 docker compose logs --tail 20                         # no errors
 docker exec <any container on the network> python -c "import urllib.request as u; print(u.urlopen('http://career-architect-mcp:8080/healthz').read())"
 ```
-Then, in Obot (step 2), open the server's tool preview: you should see `info`, `normalize_text`, `build_index`, `match`, `lint_resume`, `lint_cover`, `resume_patch` and `posting`. Call `info` and expect the version and limits.
+Then, in Obot (step 2), open the server's tool preview: you should see `info`, `normalize_text`, `build_index`, `match`, `lint_resume`, `lint_cover`, `resume_patch` and `posting`. Call `info` and expect the version and limits. The tester's Resources tab should list the `guide://` documents and its Prompts tab `jobstatus`, `followups`, `score`, `tailor`, `cover`, `prep` and `research`.
 
 ## 2. Register the servers in Obot
 

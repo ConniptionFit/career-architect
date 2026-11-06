@@ -1,5 +1,12 @@
 # Changelog
 
+## Server 1.4.0 (2026-11-06)
+
+- **The guide as MCP resources.** Every skill document is now also a listed resource, `guide://start` and `guide://<topic>` (for example `guide://workflows/score`), with the MIME type `text/markdown`, plus one templated resource, `guide://{+topic}`, that takes the same topics as the `guide` tool. In Claude Code, type `@` and pick one to put its text in the conversation without a tool call. Only the bundled documents are served; an unknown or escaping topic is refused.
+- **Job-search slash commands as MCP prompts.** `jobstatus [status]`, `followups [days]`, `score <posting>`, `tailor <posting>`, `cover <job>`, `prep <job>` and `research <job>`. Each returns a short request that tells the assistant which guide documents to follow, so the rules (claims, atoms checks, asking before any write) come with it; the work still runs through the usual tools under the person's own sign-ins. Arguments are single words (Claude Code splits on spaces) and are checked: a job slug, an https posting URL, one of the tracker statuses, or a day count from 1 to 365. A bad one is answered as an invalid argument, not a crash.
+- No tool added or removed, so no vMCP re-apply. Deploy the server to publish. After deploying, check in the Obot vMCP tester (and from Claude Code with `@` and `/`) that the Jobs vMCP passes resources and prompts through to clients; Reactive Resume's own schema resource already reaches clients this way.
+- Nothing personal is served as a resource: the server still holds no one's sign-in. Resumes and applications as resources are tracked separately (they belong in Reactive Resume's own MCP server).
+
 ## Unreleased (documentation only)
 
 - **New: `docs/RESPONSE-FILTER.md`.** The optional Obot filter, adapter and Redpanda Connect pipeline that can drop fields nobody asked for: the policy (never truncate, fail open, Jobs reads and checks exempt, no content in logs), how to add the filter in Obot (the custom-filter workaround for the fixed-URL form bug), shadow then enforce, how to turn it off, and the crash-loop an empty filter URL causes for every MCP call. Linked from the README, `ARCHITECTURE.md`, `OPERATIONS.md` and `SECURITY.md`.
