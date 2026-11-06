@@ -7,6 +7,8 @@ One install for the Jobs job-search assistant: a small launcher skill and the Jo
 - **claude.ai or the desktop app:** Customize, Plugins, Add, Add marketplace, then this repository's address. Install `jobs`. Open the plugin's Connectors tab, add and connect the Jobs connector (you sign in to Obot with your Google account), then authorise Google Drive, Google Docs and Reactive Resume when Obot asks. Do this once.
 - **Claude Code:** `/plugin marketplace add <owner>/<this repository>`, `/plugin install jobs@career-architect-connect`, then `/mcp` to connect the Jobs connector.
 
+**Shortcuts.** The connector also offers slash commands and readable documents. In Claude Code, type `/` for `jobstatus`, `followups`, `score <posting URL>`, `tailor <posting URL>`, `cover <job>`, `prep <job>` and `research <job>`, and `@` for the guide documents. In claude.ai and the desktop app they are offered from the connector in the chat input, where the app supports them.
+
 You need to be added by the administrator first: Obot shows nothing to anyone it does not know. Use one install path: this plugin, or a copy of the skill, not both.
 
 This plugin's connector address is fixed to one administrator's Obot instance. It only works for the group that

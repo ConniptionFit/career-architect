@@ -38,14 +38,16 @@ for candidate in (HERE, HERE.parent / "jobs" / "scripts"):       # in the image 
 import career  # noqa: E402
 import yaml  # noqa: E402
 from mcp.server.mcpserver import MCPServer  # noqa: E402
-from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402
+from mcp.server.mcpserver.exceptions import ResourceNotFoundError, ToolError  # noqa: E402
+from mcp.shared.exceptions import MCPError  # noqa: E402
+from mcp.server.mcpserver.resources import TextResource  # noqa: E402
 from mcp.server.transport_security import TransportSecuritySettings  # noqa: E402
 from mcp.types import ToolAnnotations  # noqa: E402
 from pydantic import Field  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 from starlette.responses import JSONResponse  # noqa: E402
 
-SERVER_VERSION = "1.3.0"
+SERVER_VERSION = "1.4.0"
 log = logging.getLogger("career-mcp")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "WARNING").upper()
 if LOG_LEVEL not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
@@ -443,6 +445,125 @@ def posting(url: Annotated[str, Field(description="A public Ashby, Greenhouse or
         raise ToolError("that posting id is not on the board any more (closed or renumbered)")
     result["text"] = result["text"][:20000]
     return result
+
+
+# ---------------------------------------------------------------- resources (the guide, readable without a tool call)
+#
+# A resource is read-only data at a URI that the client fetches itself (Claude Code: type `@`), so its text reaches the conversation
+# without the model calling a tool. Only the bundled skill documents are served: the server holds no one's records, so a person's
+# resumes and applications stay behind the Reactive Resume and Drive tools.
+
+def guide_uri(key: str) -> str:
+    """`SKILL.md` -> `guide://start`, `workflows/score.md` -> `guide://workflows/score`."""
+    return "guide://start" if key == "SKILL.md" else "guide://" + key.removesuffix(".md")
+
+
+def _guide_title(key: str) -> str:
+    if key == "SKILL.md":
+        return "Jobs guide: start here"
+    first = GUIDE[key].lstrip().splitlines()[0] if GUIDE[key].strip() else ""
+    heading = first.lstrip("#").strip() if first.startswith("#") else ""
+    return f"Jobs guide: {heading or key.removesuffix('.md')}"
+
+
+for _key in sorted(GUIDE):   # one listed (direct) resource per document, so `@` autocomplete can offer each of them
+    server.add_resource(TextResource(
+        uri=guide_uri(_key), name=guide_uri(_key).removeprefix("guide://"), title=_guide_title(_key), mime_type="text/markdown",
+        description=f"The `{_key}` document of the Jobs skill, the same text the `guide` tool returns for it.", text=GUIDE[_key]))
+
+
+@server.resource("guide://{+topic}", name="guide-topic", title="Jobs guide document", mime_type="text/markdown",
+                 description="Any document of the Jobs skill by topic, as the `guide` tool takes it: `start`, `workflows/score`, `references/storage`.")
+def guide_resource(topic: str) -> str:
+    key = guide_key(topic)
+    if key is None:      # the topic is not echoed: errors can reach logs
+        raise ResourceNotFoundError("no guide document by that name; list the resources to see every topic")
+    return GUIDE[key]
+
+
+# ---------------------------------------------------------------- prompts (slash commands the person runs)
+#
+# A prompt is a saved request with blanks: the person picks it (Claude Code: `/`), fills the arguments, and the client puts the returned
+# text into the conversation. Each one only says which guide documents to follow, so the skill's rules come with it and the work still
+# runs through the tools under the person's own sign-ins. Arguments are single words (Claude Code splits on spaces): a URL or a slug.
+
+INVALID_PARAMS = -32602   # JSON-RPC: a bad argument is the caller's mistake, so it is answered plainly and not logged as a crash
+STATUSES = ("saved", "applied", "screening", "interview", "offer", "rejected")
+_SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,79}")
+
+
+def _arg(name: str, value: str | None, *, url_ok: bool = False) -> str:
+    v = (value or "").strip()
+    if _SLUG.fullmatch(v) or (url_ok and re.fullmatch(r"https://[^\s<>\"']{1,500}", v)):
+        return v
+    want = "a job slug such as `fabrikam-it-manager`, or the posting's https URL" if url_ok else "a job slug such as `fabrikam-it-manager`"
+    raise MCPError(INVALID_PARAMS, f"`{name}` must be {want}")
+
+
+def _brief(topics: tuple[str, ...], task: str) -> str:
+    reads = ", then ".join(f"`{t}`" for t in topics)
+    return ("Use the Jobs connector: the MCP server that has the `guide` tool (`career_architect__guide` behind the Jobs vMCP). "
+            f"Call `guide` with topic `start`, then {reads}, and follow them, including every rule about claims and asking before any write.\n\n"
+            f"Task: {task}")
+
+
+@server.prompt(name="jobstatus", title="Job search status")
+def jobstatus(status: Annotated[str, Field(description="Optional: only rows in this status (" + ", ".join(STATUSES) + ").")] = "") -> str:
+    """Summarize the application tracker: counts by status, what changed lately and the next action for each open row."""
+    s = (status or "").strip().lower()
+    if s and s not in STATUSES:
+        raise MCPError(INVALID_PARAMS, f"`status` must be one of {', '.join(STATUSES)}")
+    scope = f"rows with status `{s}`" if s else "all open rows (not archived)"
+    return _brief(("references/reactive-resume", "references/delegation"),
+                  f"Give me a status report of my job search from the application tracker, covering {scope}. Start with "
+                  "`reactive_resume__get_application_stats`, then list the rows. Show counts by status, then a short table of company, role, "
+                  "status, last activity date and the next action. Read only: do not change any row.")
+
+
+@server.prompt(name="followups", title="Applications to follow up")
+def followups(days: Annotated[str, Field(description="Optional: how many days without activity counts as stale. Default 7.")] = "7") -> str:
+    """List applications that are due a follow-up or have gone quiet, with a suggested next step for each."""
+    d = (days or "7").strip()
+    if not re.fullmatch(r"[0-9]{1,3}", d) or not 1 <= int(d) <= 365:
+        raise MCPError(INVALID_PARAMS, "`days` must be a whole number from 1 to 365")
+    return _brief(("references/reactive-resume", "references/delegation"),
+                  f"Find my open applications (status saved, applied, screening, interview or offer, not archived) whose `followUpAt` is today or "
+                  f"earlier, or with no activity in the last {d} days. For each: company, role, status, days since the last activity and one "
+                  "suggested next step. Read only: do not change any row; ask before setting a follow-up date.")
+
+
+@server.prompt(name="score", title="Score a job posting")
+def score(posting: Annotated[str, Field(description="The posting's https URL, or the slug of a job already saved under jobs/<slug>.")]) -> str:
+    """Score how well a posting fits my verified history, with the open questions first."""
+    return _brief(("workflows/score",), f"Score this job posting against my records: {_arg('posting', posting, url_ok=True)}")
+
+
+@server.prompt(name="tailor", title="Tailor a resume")
+def tailor(posting: Annotated[str, Field(description="The posting's https URL, or the slug of a job already saved under jobs/<slug>.")]) -> str:
+    """Write a tailored resume for a posting from my confirmed facts, checked before anything is saved."""
+    return _brief(("workflows/resume", "style/voice"),
+                  f"Write a tailored resume for this posting: {_arg('posting', posting, url_ok=True)}. Show me the selection before writing to "
+                  "Reactive Resume or Drive.")
+
+
+@server.prompt(name="cover", title="Write a cover letter")
+def cover(job: Annotated[str, Field(description="The slug of the job (jobs/<slug>); its tailored resume must exist first.")]) -> str:
+    """Write a cover letter for a job that already has a tailored resume."""
+    return _brief(("workflows/cover", "style/voice"),
+                  f"Write a cover letter for the job `{_arg('job', job)}`. Show me the draft before saving it anywhere.")
+
+
+@server.prompt(name="prep", title="Prepare for an interview")
+def prep(job: Annotated[str, Field(description="The slug of the job (jobs/<slug>).")]) -> str:
+    """Interview talking points for a job, built from my recorded accomplishments."""
+    return _brief(("workflows/interview",), f"Help me prepare for the interview for the job `{_arg('job', job)}`. Ask who is in the room first.")
+
+
+@server.prompt(name="research", title="Research an application")
+def research(job: Annotated[str, Field(description="The slug or company tag of the application (for example `fabrikam`).")]) -> str:
+    """Confirm pay, role notes and contacts for an application and propose the tracker update."""
+    return _brief(("workflows/research", "references/reactive-resume"),
+                  f"Research the application `{_arg('job', job)}`: pay, role notes and contacts. Show me the proposed tracker update before writing it.")
 
 
 # ---------------------------------------------------------------- HTTP app

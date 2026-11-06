@@ -21,6 +21,7 @@ A work history is personal data: employers, dates, accomplishments, contact deta
 - **No content in logs.** The default log level is WARNING. A crash logs only the tool name, the exception type and code frames; the message (which could quote a document) is withheld from logs and from the caller.
 - **Authenticated.** Every request except `/healthz` must carry `X-Career-Token` or `Authorization: Bearer` equal to the shared secret (constant-time comparison); with no token the server refuses to start, unless `CAREER_MCP_ALLOW_UNSECURED=1` is set (local development only).
 - **DNS-rebinding protection** through a Host allowlist; no published ports, so only containers on the Obot network reach it.
+- **Resources and prompts serve only what is in the image.** The `guide://` resources return the bundled skill documents (the same set as `guide`), and a topic that names anything else is refused. The prompts return fixed request text; their arguments must be a job slug, an https URL, a tracker status or a day count, so a prompt cannot carry free text into the conversation.
 - **Bounded input.** Document, document-count, total and body-size limits. YAML aliases are rejected, so no expansion bombs.
 - **Bounded output to the network.** The only outbound call is `posting`, restricted in code to three public ATS API hosts over https, with a timeout and a size cap.
 - **Container.** Non-root user, all capabilities dropped, `no-new-privileges`, memory, CPU and pid limits.
