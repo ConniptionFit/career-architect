@@ -1,6 +1,9 @@
 # Changelog
 
-## 2.9.0, server 1.5.0 (unreleased)
+## 2.9.0, server 1.5.0 (2026-11-19)
+
+- **Fix: the image build.** `.dockerignore` lets only listed files into the build context and did not list `mcp-server/records.py`, so the build failed at `COPY mcp-server/records.py` on the host (the running container was untouched). Listed now, and a new test checks every `COPY` source against `.dockerignore`.
+
 
 - **Direct loading from a private GitHub repository.** A person can keep their records in their own private GitHub repository instead of Drive. The checks (`build_index`, `match`, `lint_resume`, `lint_cover`, `resume_patch`) take paths beside each document argument (`skills_path`, `profile_path`, `selection_path`, `cover_path`, `posting_path`, `facts_paths`, plus `repo` and `ref`), and the server fetches the files itself, so the model no longer copies tens of kilobytes into every call. Every answer carries `records_commit`; passing it back as `ref` keeps a task on one version. `facts_paths: ["facts/"]` reads a whole folder.
 - **New tools `records_status`, `records_list`, `records_read`, `records_write`.** Plain text in and out (the server handles GitHub's base64 and blob shas). `records_write` saves a whole file in one call and is refused when the file changed since it was read; Git history replaces `_history`. Only `.md`, `.yaml`, `.yml` and `.txt` files inside the repository, no `..` or dot-files. 42 tools in total.
