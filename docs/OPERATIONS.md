@@ -25,6 +25,8 @@ docker compose --env-file ~/.config/career-architect-mcp/env up -d --build
 ```
 Use the same `--env-file` on every `docker compose` command for this project. Leaving it off fails with "set CAREER_MCP_TOKEN" instead of starting the server without a secret.
 
+**Safer: let the compose file read the token file itself.** Instead of remembering `--env-file`, add `env_file: [/home/<you>/.config/career-architect-mcp/env]` to the service (an absolute path) and delete the `CAREER_MCP_TOKEN` line under `environment:` (an entry there overrides the file, and a blank one would blank the token). Then a plain `docker compose up -d` keeps the token. A reboot was already safe: a restarted container keeps the environment it was created with. Only a recreate without the token could take the service down, and the server then refuses to start rather than run without a secret.
+
 The server has no published ports; only containers on the shared network reach it, as `http://career-architect-mcp:8080/mcp`. `CAREER_MCP_ALLOWED_HOSTS` must contain that exact `host:port` (the compose file sets it). Without a token the server will not start.
 
 ### Verify a deployment
@@ -138,6 +140,7 @@ For `app`, mount the key and the map read-only and set the env vars, for example
       CAREER_GITHUB_APP_ID: "5827242"
       CAREER_GITHUB_APP_KEY_FILE: /run/secrets/github-app.pem
       CAREER_RECORDS_MAP: /run/secrets/records-map.json
+    user: "1000:1000"   # the key is mode 600 and owned by you; the image's own user (10001) cannot read it
     volumes:
       - ~/.config/career-architect-mcp/github-app/private-key.pem:/run/secrets/github-app.pem:ro
       - ~/.config/career-architect-mcp/records-map.json:/run/secrets/records-map.json:ro

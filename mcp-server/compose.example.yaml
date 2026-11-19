@@ -17,6 +17,10 @@ services:
     image: career-architect-mcp:local
     container_name: career-architect-mcp
     restart: unless-stopped
+    # If the token file is not beside this file, read it here instead of using --env-file, and delete the
+    # CAREER_MCP_TOKEN line under environment: (an entry there overrides the file). docs/OPERATIONS.md, step 1.
+    # env_file:
+    #   - /home/<you>/.config/career-architect-mcp/env
     environment:
       CAREER_MCP_TOKEN: ${CAREER_MCP_TOKEN:?set CAREER_MCP_TOKEN in .env (openssl rand -hex 32)}
       CAREER_MCP_ALLOWED_HOSTS: career-architect-mcp:8080
