@@ -143,3 +143,15 @@ class ServerMatchesSpec(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ImageBuildContext(unittest.TestCase):
+    def test_every_file_the_dockerfile_copies_is_let_through_by_dockerignore(self):
+        """.dockerignore starts with `*` and lets files back in one by one; a COPY of a file it does not list fails the build on the host."""
+        allowed = [line[1:].strip().rstrip("/") for line in (ROOT / ".dockerignore").read_text().splitlines() if line.startswith("!")]
+        copies = re.findall(r"^COPY\s+(\S+)\s+\S+", (ROOT / "mcp-server" / "Dockerfile").read_text(), re.M)
+        self.assertTrue(copies)
+        for src in copies:
+            src = src.rstrip("/")
+            self.assertTrue(any(src == a or src.startswith(a + "/") for a in allowed), f"Dockerfile copies {src}, which .dockerignore keeps out of the build context")
+            self.assertTrue((ROOT / src).exists(), src)
