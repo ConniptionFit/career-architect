@@ -21,6 +21,7 @@ COPY mcp-server/requirements.lock ./
 RUN pip install --require-hashes --no-deps -r requirements.lock
 
 COPY mcp-server/server.py ./server.py
+COPY mcp-server/records.py ./records.py
 COPY jobs/scripts/career.py ./career.py
 # The skill's own documents, served by the `guide` tool so clients always read the current instructions (no scripts, no personal data).
 COPY jobs/SKILL.md ./jobs/SKILL.md

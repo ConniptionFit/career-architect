@@ -11,7 +11,7 @@ Reactive Resume (RR) does the layout. Your only prose output is the summary and 
    With a subagent tool, it can read the fragments and return only the atoms in play as verbatim lines (`references/subagent-facts.md`); write the selection from those.
 4. **Write the selection** (format in `references/tools.md`). Pick 4 to 6 bullets for the two most recent roles and 2 to 3 for older ones; drop roles the posting does not care about.
    Lead each role with what the posting asks for. Use the posting's own terms only where the atom supports them. Follow `style/voice.md`. Skills you list must exist in `skills`.
-5. **Check it:** `resume_patch` with the selection, `skills_md`, `profile_md` and the fragments you read plus `facts - shared`. Fix every `E`. Read the `W` lines and fix the real ones (banned phrases, dashes, repeated openers).
+5. **Check it:** `resume_patch` with the selection, `skills_md`, `profile_md` and the fragments you read plus `facts - shared` (records on GitHub: the same as paths, `references/storage-github.md`). Fix every `E`. Read the `W` lines and fix the real ones (banned phrases, dashes, repeated openers).
    "adds wording the atom never used" means the bullet may state something the person never said (an outcome, a reason, a scope). Cut it, or ask the person and put the fact in the atom first.
    Read `resume_text` once for a sense of the whole document.
    With a subagent tool, give it the selection and let it do this check (`references/subagent-lint.md`, with `return_for_write: yes` once you are ready to publish): it returns the verdict, the diffs and the `operations` to apply, so the fragments never enter the conversation.

@@ -1,6 +1,12 @@
 # Onboarding a new person
 
-Use when the person has no workspace folder under `AI/JobSearch` (`references/storage.md`, "Find the workspace"), or asks to set up their records. The goal is a workspace in their own Drive, a first set of atoms they confirmed, and a Master resume in Reactive Resume. Do it in short steps and say what each one creates. A first session usually covers steps 1 to 4; the rest can wait.
+Use when the person has no workspace folder under `AI/JobSearch` (`references/storage.md`, "Find the workspace") and no reachable GitHub records repository (`references/storage-github.md`), or asks to set up their records. The goal is a workspace in their own Drive, a first set of atoms they confirmed, and a Master resume in Reactive Resume. Do it in short steps and say what each one creates. A first session usually covers steps 1 to 4; the rest can wait.
+
+## 0. Where to keep the records
+
+Ask once: **Google Drive (nothing to set up) or a private GitHub repository (faster checks and full version history; needs a free GitHub account)?** Call `career_architect__records_status` first: if it reports `mode: off`, GitHub is not available on this server, so use Drive without asking.
+
+For GitHub: the person creates a private repository (suggest `career-records`) and installs the Career Architect Records App on **only that repository** (the administrator gives them the install link). An empty repository is fine. Then `records_status` (with `repo` if it asks) must answer `reachable: true`. Follow the steps below with these changes: skip the Drive check in step 1; in step 2 create no folders and save each file with `records_write` at its path in `references/storage-github.md` (`profile.md`, `rules.md`, `facts/shared.yaml`); in step 3 save each role as `facts/<role-id>.yaml` and run `build_index(facts_paths: ["facts/"])`; in step 5 tell them every version is in the repository's history instead of `_history`.
 
 ## 1. Confirm access before creating anything
 

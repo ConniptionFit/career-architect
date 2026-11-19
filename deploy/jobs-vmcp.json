@@ -1,7 +1,7 @@
 {
   "$comment": "Source of truth for the Jobs virtual MCP server (Obot vMCP). The skill in jobs/ documents exactly the enabled tools; tests/test_deploy_spec.py fails when the two drift. docs/OPERATIONS.md, 'Jobs vMCP', says how to apply it.",
   "name": "Jobs",
-  "description": "Jobs: the toolset behind the `jobs` (Career Architect) skill, for anything about a job posting, resume, cover letter, application, interview or the person's career records. Tools are prefixed by source. career_architect__* are deterministic checks that score a posting against the person's verified facts and lint and build resumes, letters and the skills index: run them instead of judging by hand. google_docs__* and google_drive__* read and write the person's records, kept as Google Docs in a folder named `Career Architect` in their own Drive (profile, rules, facts, skills index, jobs/<slug>). reactive_resume__* read and write their resumes, saved cover letters and application tracker in Reactive Resume. Every call acts as the signed-in person. Deleting, sharing, bulk edits, imports, locking and Reactive Resume's own AI features are deliberately not exposed. Begin every job-search task by calling career_architect__guide: it returns the current instructions (workflow, rules, storage protocol) for the `jobs` skill, so a client needs no other copy of them.",
+  "description": "Jobs: the toolset behind the `jobs` (Career Architect) skill, for anything about a job posting, resume, cover letter, application, interview or the person's career records. Tools are prefixed by source. career_architect__* are deterministic checks that score a posting against the person's verified facts and lint and build resumes, letters and the skills index: run them instead of judging by hand. google_docs__* and google_drive__* read and write the person's records kept as Google Docs in their own Drive (AI/JobSearch/<name>); career_architect__records_* read and save them when they are kept in the person's own private GitHub repository instead. reactive_resume__* read and write their resumes, saved cover letters and application tracker in Reactive Resume. Every call acts as the signed-in person. Deleting, sharing, bulk edits, imports, locking and Reactive Resume's own AI features are deliberately not exposed. Begin every job-search task by calling career_architect__guide: it returns the current instructions (workflow, rules, storage protocol) for the `jobs` skill, so a client needs no other copy of them.",
   "sources": [
     {
       "component": "Career Architect",
@@ -16,7 +16,11 @@
         "lint_resume",
         "lint_cover",
         "resume_patch",
-        "posting"
+        "posting",
+        "records_status",
+        "records_list",
+        "records_read",
+        "records_write"
       ],
       "disabled": [],
       "descriptions": {}

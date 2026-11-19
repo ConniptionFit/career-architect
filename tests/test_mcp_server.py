@@ -78,11 +78,19 @@ class Tools(unittest.IsolatedAsyncioTestCase):
     async def test_tools_are_listed_with_read_only_annotations_and_schemas(self):
         async with Client(srv.server) as c:
             tools = {t.name: t for t in (await c.list_tools()).tools}
-        self.assertEqual(set(tools), {"info", "guide", "normalize_text", "build_index", "match", "lint_resume", "lint_cover", "resume_patch", "posting"})
-        self.assertTrue(all(t.annotations.read_only_hint and not t.annotations.destructive_hint for t in tools.values()))
+        self.assertEqual(set(tools), {"info", "guide", "normalize_text", "build_index", "match", "lint_resume", "lint_cover", "resume_patch", "posting",
+                                      "records_status", "records_list", "records_read", "records_write"})
+        self.assertTrue(all(t.annotations.read_only_hint and not t.annotations.destructive_hint for n, t in tools.items() if n != "records_write"))
+        self.assertFalse(tools["records_write"].annotations.read_only_hint)          # the one tool that writes, and only to the person's own repository
+        self.assertFalse(tools["records_write"].annotations.destructive_hint)
         self.assertTrue(all(t.description for t in tools.values()))
-        self.assertEqual(tools["match"].input_schema["required"], ["skills_md", "profile_md", "requirements"])
-        self.assertEqual(tools["lint_resume"].input_schema["required"], ["selection_yaml", "skills_md", "profile_md", "facts_docs"])
+        # documents come as text or as paths, so neither is required by the schema; the tools say which is missing
+        self.assertNotIn("required", tools["match"].input_schema)
+        for t in tools.values():
+            self.assertNotIn("ctx", t.input_schema.get("properties", {}), t.name)    # the request context is injected, never a parameter
+        for name in ("match", "lint_resume", "lint_cover", "resume_patch", "build_index"):
+            self.assertIn("repo", tools[name].input_schema["properties"], name)
+            self.assertIn("ref", tools[name].input_schema["properties"], name)
         self.assertFalse(tools["info"].annotations.open_world_hint)
         self.assertTrue(tools["posting"].annotations.open_world_hint)                # the one tool that reaches the network
 

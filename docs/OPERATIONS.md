@@ -33,7 +33,7 @@ docker compose ps                                     # healthy
 docker compose logs --tail 20                         # no errors
 docker exec <any container on the network> python -c "import urllib.request as u; print(u.urlopen('http://career-architect-mcp:8080/healthz').read())"
 ```
-Then, in Obot (step 2), open the server's tool preview: you should see `info`, `normalize_text`, `build_index`, `match`, `lint_resume`, `lint_cover`, `resume_patch` and `posting`. Call `info` and expect the version and limits.
+Then, in Obot (step 2), open the server's tool preview: you should see `info`, `guide`, `normalize_text`, `build_index`, `match`, `lint_resume`, `lint_cover`, `resume_patch`, `posting` and the four `records_*` tools (present even while direct loading is off; they then answer that it is not enabled). Call `info` and expect the version and limits.
 
 ## 2. Register the servers in Obot
 
@@ -43,7 +43,7 @@ Then, in Obot (step 2), open the server's tool preview: you should see `info`, `
 - Configuration, add one item: Usage *Header*, Key `X-Career-Token`, Value *Static*, the token from the server's env file, Sensitive on. Static means the administrator sets it once and no user is ever asked for it. (*User-Supplied* would make every user paste the token.) Obot stores a static value in the entry, where administrators can read it; it protects the server from other containers on the network, not from Obot administrators.
 - If Obot refuses a private address, set `OBOT_SERVER_DISALLOW_PRIVATE_IPMCP=false` on Obot.
 - Save, then open the entry's *Tools* tab and *Populate Tool Preview* (or *Regenerate*). That dialog asks for the header value even though it is static; paste the token once and click Launch. If Obot answers `409 ... the object has been modified`, click Launch again: the entry was updated between page load and request.
-- The preview should list the eight tools.
+- The preview should list the thirteen tools.
 
 **First real connection.** Connect from a client (an Obot-connected Claude) and call `info`. Then run `docker logs career-architect-mcp`: it should be empty. A line `unauthorized request to /mcp: token header missing` means Obot did not send the static header (re-check the item above); `present but wrong` means the value differs from the server's token.
 
@@ -74,7 +74,7 @@ The skill talks to one endpoint, the **Jobs** virtual MCP server (Obot: vMCPs). 
 
 1. vMCPs, Create: name `Jobs`, description as in the spec. Add the four components, named exactly `Career Architect`, `Reactive Resume`, `Google Drive`, `Google Docs`: **the component name becomes the tool prefix** (`google_drive__list_files`), and the skill relies on those prefixes. Connect each component (Google and Reactive Resume ask you to sign in).
 2. Apply the spec. Either in the UI (each component: enable only the tools listed as `enabled` in the spec, and paste the descriptions), or with the script `deploy/apply-jobs-vmcp.js`: open your Obot in a browser as an administrator, open the developer console, paste the script (read it first) and press Enter. It prints what it changed; running it again changes nothing. It disables any tool the spec does not mention, so a tool added by a server update never appears without a decision.
-3. Check: the vMCP's Inspector tab lists exactly the enabled tools (38 at the time of writing: 9 Career Architect, 20 Reactive Resume, 5 Google Drive, 4 Google Docs). Call `career_architect__info`.
+3. Check: the vMCP's Inspector tab lists exactly the enabled tools (42 at the time of writing: 13 Career Architect, 20 Reactive Resume, 5 Google Drive, 4 Google Docs). Call `career_architect__info`.
 4. Who may connect: the vMCP's Profiles tab. The `default` profile lists the people (or groups) allowed; add each invited person there as well as in the access policies (section 5).
 
 What the allowlist keeps out, and why: deleting, sharing, ownership and shared-drive tools on Drive; every `delete_*`, `bulk_*`, `import_*`, lock and attachment tool and Reactive Resume's own AI features (`tailor_resume_for_application` and the rest, which write text that never passed the atoms check); Docs' raw `batch_update_document`, `delete_content` and formatting tools. The skill's rules 11 and 13 say the same, but the gateway is where it is enforced.
@@ -112,6 +112,42 @@ If you need a true sign-in whitelist (only accounts you create can sign in), Obo
 ### Someone leaves
 
 Remove them from both `Career Architect users` policies, the Jobs vMCP profile and the identity group; delete their Reactive Resume account. Their Drive is theirs.
+
+## 6b. Records on GitHub (direct loading)
+
+Optional. With it on, a person can keep their records in their own **private GitHub repository** instead of Drive, and the checks read files by path (`skills_path`, `facts_paths: ["facts/"]`) instead of the assistant copying each document into the call. Drive keeps working unchanged for everyone else. The person-facing steps are in `jobs/references/storage-github.md`.
+
+**The GitHub App (once).** Register an App with only *Repository permissions: Contents, read and write*, no webhook, callback `https://obot.example.com/oauth/mcp/callback`, installable by any account. The maintainer's is [Career Architect Records](https://github.com/apps/career-architect-records). The quickest way is GitHub's manifest flow: a page that posts the settings, then one exchange call (`POST https://api.github.com/app-manifests/<code>/conversions`) run **on the server host**, saving `pem` and `client_secret` to files there (mode 600, a mode-700 folder on local disk, not the compose share). Never paste the key or secret into a chat.
+
+**Each person (once).** Create a private repository (for example `career-records`), then install the App on **only that repository** (`https://github.com/apps/<app>/installations/new`). An empty repository is fine: the assistant writes the starting files.
+
+**Pick a mode** (`CAREER_RECORDS` in the server's env file):
+
+| Mode | How the server reaches a person's repository | Admin work per person | Holds a key |
+|---|---|---|---|
+| `user_token` | Obot signs each person in to GitHub and forwards their own token in a header (`CAREER_RECORDS_TOKEN_HEADER`, default `x-github-token`); the person's profile names the repository | None | No |
+| `app` | The server signs as the App (`CAREER_GITHUB_APP_ID`, `CAREER_GITHUB_APP_KEY_FILE`) and finds the caller's repository in `CAREER_RECORDS_MAP`, a JSON file `{"<Obot user id>": "owner/repo"}`, by Obot's `X-Obot-User-Id` header (`CAREER_RECORDS_USER_HEADER`) | One line in the map | Yes |
+
+`user_token` depends on Obot forwarding each person's GitHub token to a remote server, which Obot's documentation does not describe. Test it first: in the Career Architect entry, add GitHub as a per-user OAuth provider with the App's client id and secret, connect, and call `career_architect__records_status`. It lists the header names that arrived (never their values). If no token header appears, use `app`.
+
+For `app`, mount the key and the map read-only and set the env vars, for example in `docker-compose.yaml`:
+
+```
+    environment:
+      CAREER_RECORDS: app
+      CAREER_GITHUB_APP_ID: "5827242"
+      CAREER_GITHUB_APP_KEY_FILE: /run/secrets/github-app.pem
+      CAREER_RECORDS_MAP: /run/secrets/records-map.json
+    volumes:
+      - ~/.config/career-architect-mcp/github-app/private-key.pem:/run/secrets/github-app.pem:ro
+      - ~/.config/career-architect-mcp/records-map.json:/run/secrets/records-map.json:ro
+```
+
+`app` refuses to start without `CAREER_MCP_TOKEN`: the identity header is trusted only because Obot is the only caller. To find a person's Obot user id, have them call `career_architect__records_status` once; it returns `user_id`. Add the line, then restart the container (`docker compose up -d`). The server needs outbound https to `api.github.com` (it already reaches the ATS APIs for `posting`).
+
+**Check.** `records_status` with `reachable: true` and a `commit`. Then `build_index` with `facts_paths: ["facts/"]` once the person has facts.
+
+**Someone leaves.** Remove their map line; they uninstall the App from their repository (or you suspend the installation in the App's settings). The repository is theirs.
 
 ## 7. Update, and what reaches clients by itself
 
