@@ -1,5 +1,7 @@
 # Storage protocol: the person's Google Drive
 
+For a person whose records are in a private GitHub repository instead (`career_architect__records_status` answers `reachable: true`), follow `references/storage-github.md`, not this document.
+
 The person's records are Google Docs holding plain text, in one folder they own, at a **fixed location**: `AI/JobSearch/<their name>`, the same path in every deployment of this skill. It is fixed so the location never has to be searched for or guessed, and so several people signed into the same Drive (a family, a shared account) each get their own folder instead of colliding on one generic name. They are read and written through the Jobs toolset's Google Docs and Google Drive tools, which act as the signed-in person. The career-architect tools never see Drive; you read a document and pass its text to them.
 
 Tools used (full names as the Jobs toolset lists them; a client may put its own prefix in front):

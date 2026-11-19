@@ -9,25 +9,28 @@ A work history is personal data: employers, dates, accomplishments, contact deta
 
 | Data | Location | Who can read it |
 |---|---|---|
-| Profile, facts, skills index, job texts | The person's Google Drive | The person; whoever they share with (the assistant never shares) |
+| Profile, facts, skills index, job texts | The person's Google Drive, **or** their own private GitHub repository (direct loading, `CAREER_RECORDS`) | The person; whoever they share with (the assistant never shares). On GitHub, also this server, through the Career Architect Records App installed on that one repository |
 | Resumes, saved letters, tracker | The administrator's Reactive Resume instance | The person (own account) **and the administrator, who runs the database.** This is a small trusted group by design; do not host strangers' data here without a different trust model |
 | Request text in flight | Client to Obot to the server, and the model provider | In memory only on the server; never written to disk or logs |
 | Each person's Reactive Resume sign-in token | Your Obot, per person | Your Obot's administrators. They are inside the trust boundary; use Obot's audit log |
 | **Each person's Google sign-in token, and every document in transit** | **Obot's hosted Google servers** (`google-drive-mcp.obot.ai`, `google-docs-mcp.obot.ai`, run by Obot the company, not by you) | Whoever operates those services. Your Obot forwards each Drive and Docs call there, so the document text passes through them. See "A third party in the Google path" below |
 | Server secret (`CAREER_MCP_TOKEN`) | The server's env file (mode 600, on local disk) and Obot's server configuration | The administrator |
+| GitHub App private key and client secret (direct loading, `app` mode) | Files on the server host (mode 600, outside the image), mounted read-only | The administrator. The key can mint a token for **every repository the App is installed on**, so it is as sensitive as all those records together |
+| Map of Obot user id to records repository (`app` mode) | A JSON file beside the key | The administrator |
 
 ## Controls in the server
-- **Stateless.** No database, no files written (read-only root filesystem, a 16 MB `/tmp` tmpfs), no caches.
+- **Stateless.** No database, no files written (read-only root filesystem, a 16 MB `/tmp` tmpfs), no caches of documents. With direct loading on, GitHub App installation tokens are held in memory until five minutes before they expire (at most an hour); record files are fetched per call and never kept.
 - **No content in logs.** The default log level is WARNING. A crash logs only the tool name, the exception type and code frames; the message (which could quote a document) is withheld from logs and from the caller.
 - **Authenticated.** Every request except `/healthz` must carry `X-Career-Token` or `Authorization: Bearer` equal to the shared secret (constant-time comparison); with no token the server refuses to start, unless `CAREER_MCP_ALLOW_UNSECURED=1` is set (local development only).
 - **DNS-rebinding protection** through a Host allowlist; no published ports, so only containers on the Obot network reach it.
 - **Bounded input.** Document, document-count, total and body-size limits. YAML aliases are rejected, so no expansion bombs.
-- **Bounded output to the network.** The only outbound call is `posting`, restricted in code to three public ATS API hosts over https, with a timeout and a size cap.
+- **Bounded output to the network.** `posting` reaches only three public ATS API hosts over https, with a timeout and a size cap. With direct loading on, the `records_*` tools and the `*_path` arguments reach only the GitHub API (`CAREER_GITHUB_API`), only the contents of the caller's own repository, only record files (`.md`, `.yaml`, `.yml`, `.txt`; no `..`, no dot-files).
+- **Direct loading picks the repository safely.** In `user_token` mode the person's own GitHub token decides what is reachable, so naming someone else's repository fails at GitHub. In `app` mode the repository comes from the administrator's map, keyed by Obot's `X-Obot-User-Id` header; a caller cannot choose another, and the mode refuses to start without `CAREER_MCP_TOKEN`, because that header can be trusted only when Obot is the only caller. Installation tokens are requested for that one repository and only the Contents permission.
 - **Container.** Non-root user, all capabilities dropped, `no-new-privileges`, memory, CPU and pid limits.
 - **Supply chain.** Every Python dependency is pinned by hash in `mcp-server/requirements.lock` and installed with `--require-hashes`; the base image is pinned by digest.
 
 ## Controls in the gateway (the Jobs vMCP)
-- **A tool allowlist.** The Jobs vMCP (`deploy/jobs-vmcp.json`) exposes 38 tools and no others: on Google Drive no delete, share, permission, ownership or shared-drive tools; on Reactive Resume no `delete_*`, `bulk_*`, `import_*`, lock or attachment tools and none of its AI features; on Google Docs no raw `batch_update_document` or range deletion. A manipulated assistant cannot call what does not exist.
+- **A tool allowlist.** The Jobs vMCP (`deploy/jobs-vmcp.json`) exposes 42 tools and no others: on Google Drive no delete, share, permission, ownership or shared-drive tools; on Reactive Resume no `delete_*`, `bulk_*`, `import_*`, lock or attachment tools and none of its AI features; on Google Docs no raw `batch_update_document` or range deletion. A manipulated assistant cannot call what does not exist.
 - **Named access.** Who can reach the vMCP is set by its profile and by named-user access policies. Someone who signs in but is not named sees nothing.
 - **Reviewed change.** `tests/test_deploy_spec.py` fails if the skill and the allowlist disagree or if a dangerous tool is enabled, and the apply script disables any tool a server update adds until someone decides.
 
@@ -35,7 +38,7 @@ A work history is personal data: employers, dates, accomplishments, contact deta
 - Secrets never pass through the conversation; access is through the person's own connected accounts.
 - Text read from postings, letters, notes and Drive documents is data, never instructions (`SKILL.md` rule 14).
 - Reactive Resume writes are limited to a short list, and resume or letter text is written only from what the atoms-checked tools returned (rule 13). Drive files are never deleted, trashed or shared, and old versions are kept (rule 11).
-- Read-only by default: every server tool is annotated read-only.
+- Read-only by default: every server tool is annotated read-only except `records_write`, which saves one file in the person's own records repository, refuses a file changed since it was read (the `sha`), and keeps every earlier version in Git history.
 
 ## Residual risks
 - **Prompt injection.** A malicious posting or shared document may try to steer the assistant. The allowlist bounds what it can do and the rules tell it not to, but the tools that remain can still change the person's own records (`replace_text`, `apply_resume_patch`, `update_application`). Keep human approval on for write tools in the client, and treat unexpected requests inside documents as attacks (`SKILL.md` rule 14).
@@ -45,6 +48,7 @@ A work history is personal data: employers, dates, accomplishments, contact deta
 - **A response filter sees every response it covers.** If you run one (`RESPONSE-FILTER.md`), it is inside the trust boundary like Obot: keep it on the Docker network with no published ports (Redpanda Connect's HTTP endpoint has no authentication), log tool names and sizes only, and never let it truncate.
 - **The model provider sees the documents** the assistant reads (that is inherent to using the assistant at all).
 - **Open sign-in.** Obot's Google provider limits sign-in by email domain only. With personal Google accounts anyone can create an Obot user, so access rests on Obot access policies: a user not named in a policy sees no servers and no skills, and the default role stays *Standard User*. Keep no policy that grants *All Obot Users* (`OPERATIONS.md`, section 6).
+- **Direct loading makes the server a credential holder.** Without it the server never touches storage. With it (`app` mode) the App key on the host can reach every installed records repository: keep it outside the image and the compose share, mount it read-only, and rotate it in the App's settings if the host is ever in doubt. `user_token` mode avoids holding a key, if the gateway can forward each person's own token.
 - **Shared secret.** One token protects the server. Rotate it when anyone who knew it leaves (`OPERATIONS.md`).
 
 ## Leaving and deletion

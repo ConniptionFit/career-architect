@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.9.0, server 1.5.0 (unreleased)
+
+- **Direct loading from a private GitHub repository.** A person can keep their records in their own private GitHub repository instead of Drive. The checks (`build_index`, `match`, `lint_resume`, `lint_cover`, `resume_patch`) take paths beside each document argument (`skills_path`, `profile_path`, `selection_path`, `cover_path`, `posting_path`, `facts_paths`, plus `repo` and `ref`), and the server fetches the files itself, so the model no longer copies tens of kilobytes into every call. Every answer carries `records_commit`; passing it back as `ref` keeps a task on one version. `facts_paths: ["facts/"]` reads a whole folder.
+- **New tools `records_status`, `records_list`, `records_read`, `records_write`.** Plain text in and out (the server handles GitHub's base64 and blob shas). `records_write` saves a whole file in one call and is refused when the file changed since it was read; Git history replaces `_history`. Only `.md`, `.yaml`, `.yml` and `.txt` files inside the repository, no `..` or dot-files. 42 tools in total.
+- **Two ways to reach a person's repository** (`CAREER_RECORDS`): `user_token` (Obot forwards the person's own GitHub token; nothing held by the server) and `app` (the Career Architect Records GitHub App, a repository map keyed by Obot's `X-Obot-User-Id`; refuses to start without `CAREER_MCP_TOKEN`). Off by default: with it off, nothing changes for anyone.
+- **The shared secret prefers `X-Career-Token`** when both it and `Authorization` arrive, so the gateway can use `Authorization` for the person's own token.
+- **Skill.** `SKILL.md` step 1 calls `records_status` to pick the storage; new `references/storage-github.md`; onboarding offers Drive or GitHub; workflows, `tools.md` and `delegation.md` say to pass paths for records on GitHub. Drive is unchanged.
+- Deploy: apply the vMCP spec first (four new tools), then deploy the server. Setup is `docs/OPERATIONS.md`, section 6b. Server 1.4.0 and skill 2.8.0 are left to the open MCP-resources change.
+
 ## Unreleased (documentation only)
 
 - **New: `docs/RESPONSE-FILTER.md`.** The optional Obot filter, adapter and Redpanda Connect pipeline that can drop fields nobody asked for: the policy (never truncate, fail open, Jobs reads and checks exempt, no content in logs), how to add the filter in Obot (the custom-filter workaround for the fixed-URL form bug), shadow then enforce, how to turn it off, and the crash-loop an empty filter URL causes for every MCP call. Linked from the README, `ARCHITECTURE.md`, `OPERATIONS.md` and `SECURITY.md`.

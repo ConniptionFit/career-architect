@@ -2,7 +2,7 @@
 
 Where things are saved: `references/storage.md`. First-time setup, workspace creation and the Master resume: `references/onboarding.md`. Templates for each document are in `assets/`.
 
-A change to the facts is always the same four steps: edit the role's fragment (clean text: `normalize_text` first), run `build_index` over all fragments and fix any error, save the fragment as a new version, save the returned `skills_md` as the new `skills`. Do all four in the same task, and tell the person in one line what changed.
+A change to the facts is always the same four steps: edit the role's fragment (clean text: `normalize_text` first), run `build_index` over all fragments and fix any error, save the fragment as a new version, save the returned `skills_md` as the new `skills`. Do all four in the same task, and tell the person in one line what changed. Records on GitHub: the same four steps with `records_write` and `build_index(facts_paths: ["facts/"])` (`references/storage-github.md`, "Write").
 
 ## Capturing an atom
 Ask about one role at a time. For each accomplishment get: what they did in their own words (this becomes `say`), the tools (`tags`), how deep it went

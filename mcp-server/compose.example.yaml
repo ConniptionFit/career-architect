@@ -21,9 +21,17 @@ services:
       CAREER_MCP_TOKEN: ${CAREER_MCP_TOKEN:?set CAREER_MCP_TOKEN in .env (openssl rand -hex 32)}
       CAREER_MCP_ALLOWED_HOSTS: career-architect-mcp:8080
       LOG_LEVEL: WARNING
+      # Direct loading from each person's private GitHub records repository (docs/OPERATIONS.md, section 6b). Off by default.
+      # CAREER_RECORDS: app
+      # CAREER_GITHUB_APP_ID: "<app id>"
+      # CAREER_GITHUB_APP_KEY_FILE: /run/secrets/github-app.pem
+      # CAREER_RECORDS_MAP: /run/secrets/records-map.json
+    # volumes:
+    #   - ~/.config/career-architect-mcp/github-app/private-key.pem:/run/secrets/github-app.pem:ro
+    #   - ~/.config/career-architect-mcp/records-map.json:/run/secrets/records-map.json:ro
     networks:
       - postgres_net
-    # No published ports: only containers on the network reach it. The service holds no data and writes nothing.
+    # No published ports: only containers on the network reach it. The service holds no data and writes nothing to disk.
     read_only: true
     tmpfs:
       - /tmp:size=16m

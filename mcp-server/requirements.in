@@ -3,3 +3,4 @@
 mcp==2.2.0
 pyyaml>=6,<7
 uvicorn>=0.30
+cryptography          # records.py signs the GitHub App JWT (already pulled in by mcp; listed because it is used directly)

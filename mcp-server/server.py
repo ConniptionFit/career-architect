@@ -1,8 +1,9 @@
 """career-architect MCP server: the deterministic half of the `jobs` skill, hosted so any MCP client can use it through Obot.
 
-Stateless by design. Every tool is a pure function of the text it is given: nothing is written to disk, nothing is kept
-between calls, and request bodies are never logged (they hold a person's work history). The user's documents live in
-their own Google Drive; the agent reads them there and passes text in. See docs/ARCHITECTURE.md.
+Stateless by design. Every check is a pure function of the documents it is given: nothing is written to disk, nothing is kept
+between calls, and request bodies are never logged (they hold a person's work history). A person's documents live in their
+own Google Drive (the agent reads them there and passes text in) or, with direct loading on (records.py, CAREER_RECORDS),
+in their own private GitHub repository, from which the server fetches the files a call names. See docs/ARCHITECTURE.md.
 In the deployment this is one component of a virtual MCP server named Jobs, next to Reactive Resume, Google Drive and Google Docs.
 
 Run:  python server.py            (listens on $MCP_HOST:$MCP_PORT, default 0.0.0.0:8080, path /mcp)
@@ -10,6 +11,7 @@ Env:  CAREER_MCP_TOKEN            shared secret; when set every request except /
                                   `Authorization: Bearer <token>` or `X-Career-Token: <token>`
       CAREER_MCP_ALLOWED_HOSTS    comma-separated Host header values accepted (DNS-rebinding protection)
       CAREER_MCP_ALLOW_UNSECURED  set to 1 to start without a token (local development only); otherwise a missing token is fatal
+      CAREER_RECORDS              off (default), user_token or app: direct loading from each person's GitHub records repository (records.py)
 """
 from __future__ import annotations
 
@@ -36,8 +38,9 @@ for candidate in (HERE, HERE.parent / "jobs" / "scripts"):       # in the image 
         sys.path.insert(0, str(candidate))
         break
 import career  # noqa: E402
+import records  # noqa: E402
 import yaml  # noqa: E402
-from mcp.server.mcpserver import MCPServer  # noqa: E402
+from mcp.server.mcpserver import Context, MCPServer  # noqa: E402
 from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402
 from mcp.server.transport_security import TransportSecuritySettings  # noqa: E402
 from mcp.types import ToolAnnotations  # noqa: E402
@@ -45,7 +48,7 @@ from pydantic import Field  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 from starlette.responses import JSONResponse  # noqa: E402
 
-SERVER_VERSION = "1.3.0"
+SERVER_VERSION = "1.5.0"
 log = logging.getLogger("career-mcp")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "WARNING").upper()
 if LOG_LEVEL not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
@@ -201,13 +204,14 @@ server = MCPServer(
     version=SERVER_VERSION,
     instructions=(
         "Deterministic checks for the `jobs` skill: score a job posting against a skills index, lint a tailored resume or cover letter "
-        "against the person's recorded facts, and build the Reactive Resume patch. Stateless: pass the text of the person's documents "
-        "(as read from Google Docs, unchanged) in every call; nothing is stored. Run these checks instead of judging by hand: a resume or "
+        "against the person's recorded facts, and build the Reactive Resume patch. Pass the text of the person's documents "
+        "(as read from Google Docs, unchanged), or, when their records are on GitHub, the file paths (`*_path`, `facts_paths`) so the server reads them itself; nothing is stored. Run these checks instead of judging by hand: a resume or "
         "letter that skipped them has not been checked against the person's facts. Begin every job-search task by calling `guide`: "
         "it returns the current instructions for the `jobs` skill (workflow, rules, storage protocol), so a client needs no other copy of them."
     ),
     log_level=LOG_LEVEL,        # the SDK configures logging itself at construction and defaults to INFO, which logs tool error messages
 )
+RECORDS = records.Records(records.Config.from_env())
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 Doc = Annotated[str, Field(description="Document text exactly as read from the person's Google Doc (`markdown_content` of the Google Docs get_document tool), copied unchanged. It is cleaned automatically; text from other Drive readers (escaped, doubled or base64) also works.")]
 
@@ -233,7 +237,8 @@ def guarded(fn):
 def info() -> dict[str, Any]:
     """Health check: the server version, its limits and the date it uses for 'present'. Call it first when a task begins or when another tool of this server fails."""
     return {"name": "career-architect", "version": SERVER_VERSION, "today": dt.datetime.now(dt.timezone.utc).date().isoformat(),
-            "limits": {"document_chars": MAX_DOC, "documents": MAX_DOCS, "total_chars": MAX_TOTAL}, "stateless": True}
+            "limits": {"document_chars": MAX_DOC, "documents": MAX_DOCS, "total_chars": MAX_TOTAL}, "stateless": True,
+            "records": RECORDS.cfg.mode}
 
 
 @server.tool(title="Read the Jobs guide", annotations=READ_ONLY)
@@ -261,67 +266,118 @@ def normalize_text(text: Doc, source: Annotated[str, Field(description="docs (te
         raise ToolError(str(e))
 
 
+Repo = Annotated[str, Field(description="Direct loading only: the person's records repository on GitHub, owner/name (`records_repo` in their profile). Leave empty when you pass document text.")]
+Ref = Annotated[str, Field(description="Direct loading only: the commit to read, as `records_commit` returned by an earlier call in this task, so every check in the task sees one version. Empty reads the latest.")]
+Path = Annotated[str, Field(description="Direct loading only: the file's path in the records repository (for example `skills.md`), instead of its text.")]
+Paths = Annotated[list[str], Field(description="Direct loading only: paths of facts files in the records repository, instead of facts_docs. A path ending in `/` means every file directly in that folder (`facts/` for all of them). Text in facts_docs, if any, comes first.")]
+
+
+class Loader:
+    """The documents one call needs: text the caller passed, or files fetched from the person's repository, all at one commit."""
+
+    def __init__(self, ctx: Context | None, repo: str = "", ref: str = ""):
+        self.ctx, self.repo_arg, self.ref = ctx, repo, ref
+        self.store: records.Repo | None = None
+        self.commit = ""
+
+    def _open(self) -> records.Repo:
+        if self.store is None:
+            try:
+                self.store = RECORDS.open(self.ctx.headers if self.ctx else None, self.repo_arg or None)
+                self.commit = records.check_ref(self.ref) or self.store.head()
+            except records.RecordsError as e:
+                raise ToolError(str(e))
+        return self.store
+
+    def files(self, paths: list[str]) -> list[str]:
+        store = self._open()
+        try:
+            return [f["text"] for f in store.read_many(paths, self.commit)]
+        except records.RecordsError as e:
+            raise ToolError(str(e))
+
+    def text(self, name: str, value: Any, path: str = "", required: bool = True) -> str:
+        if path:
+            return _text(name, self.files([path])[0])
+        return _text(name, value, required)
+
+    def docs(self, name: str, values: Any, paths: list[str] | None = None, required: bool = True) -> list[str]:
+        if paths:
+            values = ([values] if isinstance(values, str) and values else list(values or [])) + self.files(paths)
+        return _docs(name, values, required)
+
+    def stamp(self, out: dict) -> dict:
+        if self.commit:
+            out["records_commit"] = self.commit
+        return out
+
+
 @server.tool(title="Build the skills index", annotations=READ_ONLY)
 @guarded
 def build_index(
-    facts_docs: Annotated[list[str], Field(description="Every facts fragment: the shared one (aliases, credentials, education) and one per role. All of them, so years and tags are complete.")],
+    facts_docs: Annotated[list[str], Field(description="Every facts fragment: the shared one (aliases, credentials, education) and one per role. All of them, so years and tags are complete.")] = [],
     today: Annotated[str | None, Field(description="YYYY-MM-DD; only for tests")] = None,
+    facts_paths: Paths = [],
+    repo: Repo = "",
+    ref: Ref = "",
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """Use after any change to the person's facts, and to validate them before saving. Validates every facts fragment together and generates the `skills` index: each skill's years
     (union of role spans), last use, depth, evidence atoms, aliases, unconfirmed atoms, which role holds which atom, and the career length. Save the returned `skills_md` as the `skills`
-    document; scoring and linting need only that. Returns errors instead when the facts are invalid: fix them before saving anything."""
-    docs = _docs("facts_docs", facts_docs)
+    document; scoring and linting need only that. Returns errors instead when the facts are invalid: fix them before saving anything. With direct loading pass `facts_paths: ["facts/"]`."""
+    load = Loader(ctx, repo, ref)
+    docs = load.docs("facts_docs", facts_docs, facts_paths)
     facts = _facts("facts_docs", docs)
     when = _today(today)
     errors = career.validate(facts, when)
     if errors:
-        return {"ok": False, "errors": errors}
+        return load.stamp({"ok": False, "errors": errors})
     idx = career.build_index(facts, when)
-    return {"ok": True, "skills_md": career.render_skills_md(facts, when), "tags": len(idx),
-            "roles": len(facts["roles"]), "atoms": sum(len(r.get("atoms") or []) for r in facts["roles"])}
+    return load.stamp({"ok": True, "skills_md": career.render_skills_md(facts, when), "tags": len(idx),
+                       "roles": len(facts["roles"]), "atoms": sum(len(r.get("atoms") or []) for r in facts["roles"])})
 
 
 @server.tool(title="Score a posting", annotations=READ_ONLY)
 @guarded
 def match(
-    skills_md: Doc,
-    profile_md: Doc,
-    requirements: Annotated[str, Field(description="tag[:must|nice[:min_years]],... e.g. okta:must:5,terraform:nice. Use the tag names in skills_md; aliases resolve.")],
+    skills_md: Doc = "",
+    profile_md: Doc = "",
+    requirements: Annotated[str, Field(description="tag[:must|nice[:min_years]],... e.g. okta:must:5,terraform:nice. Use the tag names in skills_md; aliases resolve.")] = "",
+    skills_path: Path = "",
+    profile_path: Path = "",
+    repo: Repo = "",
+    ref: Ref = "",
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """Use to score how well a job posting fits the person, before any resume or letter. Coverage table and score ceiling for a list of the posting's requirements, from the skills index
     and the profile's never_claim / known_gaps. Must-haves gate the ceiling; nice-to-haves only add to it. A requirement with no evidence of its own but hands-on
     evidence for a tool doing the same job is `adjacent` (scored as partial, never claimed). The final score is the ceiling or one point below with a stated reason,
     never above. Lists requirements to ask the person about (`ask`: unasked and adjacent)."""
-    parsed = _index(_text("skills_md", skills_md))
-    profile = _profile(_text("profile_md", profile_md))
+    load = Loader(ctx, repo, ref)
     reqs = _text("requirements", requirements)
     if not career.parse_reqs(reqs):
         raise ToolError("requirements is empty")
+    parsed = _index(load.text("skills_md", skills_md, skills_path))
+    profile = _profile(load.text("profile_md", profile_md, profile_path))
     rows, strict, lenient, table = career.match_table(parsed["idx"], parsed["amap"], profile, parsed["pending"], reqs, parsed["related"])
-    return {"table": table, "ceiling": strict, "ceiling_if_every_unasked_is_met": lenient,
+    return load.stamp({"table": table, "ceiling": strict, "ceiling_if_every_unasked_is_met": lenient,
             "rows": [{"requirement": r["tag"], "level": r["lvl"], "status": r["status"], "years": r["yrs"], "depth": r["depth"], "evidence": r["ev"]} for r in rows],
-            "ask": [r["tag"] for r in rows if r["status"] in ("unasked", "adjacent")]}
+            "ask": [r["tag"] for r in rows if r["status"] in ("unasked", "adjacent")]})
 
 
-@server.tool(title="Lint a resume selection", annotations=READ_ONLY)
-@guarded
-def lint_resume(
-    selection_yaml: Doc,
-    skills_md: Doc,
-    profile_md: Doc,
-    facts_docs: Annotated[list[str], Field(description="The facts fragments that hold the roles and atoms the selection cites, plus the shared fragment. Not the whole career.")],
-    today: Annotated[str | None, Field(description="YYYY-MM-DD; only for tests")] = None,
-) -> dict[str, Any]:
-    """Use to check a tailored resume selection before it is written anywhere: every bullet traces to a usable atom, no invented numbers or scope, never_claim respected, skills exist in the
-    index, years match the computed career, plus style warnings. Returns the issues and the plain-text resume for a read-through. Fix every error (E) before continuing."""
-    parsed = _index(_text("skills_md", skills_md))
-    profile = _profile(_text("profile_md", profile_md))
-    facts = _facts("facts_docs", _docs("facts_docs", facts_docs))
+def _resume_inputs(load: Loader, selection_yaml, skills_md, profile_md, facts_docs, today, selection_path, skills_path, profile_path, facts_paths):
+    """The texts a resume check needs, each passed in or fetched. Every document is read once per call."""
+    parsed = _index(load.text("skills_md", skills_md, skills_path))
+    profile = _profile(load.text("profile_md", profile_md, profile_path))
+    facts = _facts("facts_docs", load.docs("facts_docs", facts_docs, facts_paths))
     facts["aliases"] = {**parsed["aliases"], **facts.get("aliases", {})}
-    when = _today(today)
-    sel = _yaml("selection_yaml", _text("selection_yaml", selection_yaml))
+    sel = _yaml("selection_yaml", load.text("selection_yaml", selection_yaml, selection_path))
     if not isinstance(sel, dict):
         raise ToolError("selection_yaml must be a YAML mapping (target, summary, skills, roles)")
+    return parsed, profile, facts, sel, _today(today)
+
+
+def _lint_resume(parsed, profile, facts, sel, when) -> dict[str, Any]:
     ctx = career.Ctx.from_data(facts, profile, when)
     issues = _issues(career.lint(ctx, sel, idx=parsed["idx"], career_months=parsed["career_months"]))
     out = _report(issues)
@@ -334,34 +390,69 @@ def lint_resume(
     return out
 
 
+FactsDocs = Annotated[list[str], Field(description="The facts fragments that hold the roles and atoms the selection cites, plus the shared fragment. Not the whole career.")]
+
+
+@server.tool(title="Lint a resume selection", annotations=READ_ONLY)
+@guarded
+def lint_resume(
+    selection_yaml: Doc = "",
+    skills_md: Doc = "",
+    profile_md: Doc = "",
+    facts_docs: FactsDocs = [],
+    today: Annotated[str | None, Field(description="YYYY-MM-DD; only for tests")] = None,
+    selection_path: Path = "",
+    skills_path: Path = "",
+    profile_path: Path = "",
+    facts_paths: Paths = [],
+    repo: Repo = "",
+    ref: Ref = "",
+    ctx: Context | None = None,
+) -> dict[str, Any]:
+    """Use to check a tailored resume selection before it is written anywhere: every bullet traces to a usable atom, no invented numbers or scope, never_claim respected, skills exist in the
+    index, years match the computed career, plus style warnings. Returns the issues and the plain-text resume for a read-through. Fix every error (E) before continuing."""
+    load = Loader(ctx, repo, ref)
+    inputs = _resume_inputs(load, selection_yaml, skills_md, profile_md, facts_docs, today, selection_path, skills_path, profile_path, facts_paths)
+    return load.stamp(_lint_resume(*inputs))
+
+
 @server.tool(title="Lint a cover letter", annotations=READ_ONLY)
 @guarded
 def lint_cover(
-    cover_yaml: Doc,
-    skills_md: Doc,
-    profile_md: Doc,
-    facts_docs: Annotated[list[str], Field(description="The facts fragments that hold the atoms the letter cites, plus the shared fragment.")],
+    cover_yaml: Doc = "",
+    skills_md: Doc = "",
+    profile_md: Doc = "",
+    facts_docs: Annotated[list[str], Field(description="The facts fragments that hold the atoms the letter cites, plus the shared fragment.")] = [],
     posting_text: Annotated[str, Field(description="The job posting text, so statements about the company can be checked.")] = "",
     today: Annotated[str | None, Field(description="YYYY-MM-DD; only for tests")] = None,
+    cover_path: Path = "",
+    skills_path: Path = "",
+    profile_path: Path = "",
+    facts_paths: Paths = [],
+    posting_path: Path = "",
+    repo: Repo = "",
+    ref: Ref = "",
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """Use to check a cover letter before it is saved: claims about the person cite atoms, statements about the company come from the posting, no invented figures, voice rules.
     Returns the issues, the plain text, and the HTML (`content_html`, `recipient_html`, `name`) to save as a Reactive Resume cover letter."""
-    parsed = _index(_text("skills_md", skills_md))
-    profile = _profile(_text("profile_md", profile_md))
-    facts = _facts("facts_docs", _docs("facts_docs", facts_docs))
+    load = Loader(ctx, repo, ref)
+    parsed = _index(load.text("skills_md", skills_md, skills_path))
+    profile = _profile(load.text("profile_md", profile_md, profile_path))
+    facts = _facts("facts_docs", load.docs("facts_docs", facts_docs, facts_paths))
     facts["aliases"] = {**parsed["aliases"], **facts.get("aliases", {})}
     when = _today(today)
-    letter = _yaml("cover_yaml", _text("cover_yaml", cover_yaml))
+    letter = _yaml("cover_yaml", load.text("cover_yaml", cover_yaml, cover_path))
     if not isinstance(letter, dict):
         raise ToolError("cover_yaml must be a YAML mapping (target, recipient, paragraphs)")
-    jd = _text("posting_text", posting_text, required=False)
-    ctx = career.Ctx.from_data(facts, profile, when)
-    issues = _issues(career.lint_letter(ctx, letter, None, idx=parsed["idx"], career_months=parsed["career_months"], jd=jd))
+    jd = load.text("posting_text", posting_text, posting_path, required=False)
+    cctx = career.Ctx.from_data(facts, profile, when)
+    issues = _issues(career.lint_letter(cctx, letter, None, idx=parsed["idx"], career_months=parsed["career_months"], jd=jd))
     out = _report(issues)
-    recipient, content = career.letter_html(ctx, letter)
-    out.update(cover_text=career.letter_text(ctx, letter), recipient_html=recipient, content_html=content,
-               name=career.doc_title(ctx, letter.get("target") or {}, "Cover Letter")[:100])
-    return out
+    recipient, content = career.letter_html(cctx, letter)
+    out.update(cover_text=career.letter_text(cctx, letter), recipient_html=recipient, content_html=content,
+               name=career.doc_title(cctx, letter.get("target") or {}, "Cover Letter")[:100])
+    return load.stamp(out)
 
 
 # fit_name and DEFAULT_MASTER live in career.py so the hosted and local (`career patch`) paths share one definition.
@@ -372,24 +463,29 @@ DEFAULT_MASTER = career.DEFAULT_MASTER
 @server.tool(title="Build the Reactive Resume patch", annotations=READ_ONLY)
 @guarded
 def resume_patch(
-    selection_yaml: Doc,
-    skills_md: Doc,
-    profile_md: Doc,
-    facts_docs: Annotated[list[str], Field(description="Fragments holding the cited roles and atoms AND the shared fragment (credentials and education are printed on the resume).")],
+    selection_yaml: Doc = "",
+    skills_md: Doc = "",
+    profile_md: Doc = "",
+    facts_docs: Annotated[list[str], Field(description="Fragments holding the cited roles and atoms AND the shared fragment (credentials and education are printed on the resume).")] = [],
     master_json: Annotated[str, Field(description="Optional: JSON of the Master resume (or just data.sections.experience/skills first items and data.summary) so item fields match the instance exactly. Omit to use Reactive Resume 5.x defaults.")] = "",
     today: Annotated[str | None, Field(description="YYYY-MM-DD; only for tests")] = None,
+    selection_path: Path = "",
+    skills_path: Path = "",
+    profile_path: Path = "",
+    facts_paths: Paths = [],
+    repo: Repo = "",
+    ref: Ref = "",
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """Use to turn a checked resume selection into the edit to make in Reactive Resume. Lints the selection and, only when it has no errors, returns the JSON Patch `operations` that fill a duplicate
     of the person's Master resume (summary, experience, skills, header, education, certifications), plus `resume_name` (at most 64 characters) and `resume_slug` for the duplicate. Apply the operations
     unchanged with Reactive Resume's apply_resume_patch."""
-    linted = lint_resume(selection_yaml, skills_md, profile_md, facts_docs, today)
+    load = Loader(ctx, repo, ref)
+    parsed, profile, facts, sel, when = _resume_inputs(load, selection_yaml, skills_md, profile_md, facts_docs, today,
+                                                       selection_path, skills_path, profile_path, facts_paths)
+    linted = _lint_resume(parsed, profile, facts, sel, when)
     if not linted["ok"]:
-        return {"ok": False, "errors": linted["errors"], "issues": linted["issues"], "operations": []}
-    parsed = _index(_text("skills_md", skills_md))
-    profile = _profile(_text("profile_md", profile_md))
-    facts = _facts("facts_docs", _docs("facts_docs", facts_docs))
-    facts["aliases"] = {**parsed["aliases"], **facts.get("aliases", {})}
-    sel = _yaml("selection_yaml", _text("selection_yaml", selection_yaml))
+        return load.stamp({"ok": False, "errors": linted["errors"], "issues": linted["issues"], "operations": []})
     master = DEFAULT_MASTER
     if master_json.strip():
         try:
@@ -397,14 +493,91 @@ def resume_patch(
             master["data"]["sections"]["experience"], master["data"]["sections"]["skills"]
         except (ValueError, KeyError, TypeError):
             raise ToolError("master_json must be the Master resume JSON: an object with data.sections.experience and data.sections.skills")
-    ctx = career.Ctx.from_data(facts, profile, _today(today))
-    ops = career.content_ops(ctx, sel, master)
+    cctx = career.Ctx.from_data(facts, profile, when)
+    ops = career.content_ops(cctx, sel, master)
     target = sel.get("target") or {}
-    return {"ok": True, "warnings": linted["warnings"], "issues": linted["issues"], "operations": ops,
+    return load.stamp({"ok": True, "warnings": linted["warnings"], "issues": linted["issues"], "operations": ops,
             "resume_name": fit_name(target.get("company", ""), target.get("role", ""), str(profile.get("name") or ""), "Resume"),
-            "resume_name_full": career.doc_title(ctx, target),
+            "resume_name_full": career.doc_title(cctx, target),
             "resume_slug": career.slugify(f"{target.get('company', '')} - {target.get('role', '')}"),
-            "resume_text": linted["resume_text"]}
+            "resume_text": linted["resume_text"]})
+
+
+# ---------------------------------------------------------------- records on GitHub (direct loading)
+
+WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+
+
+def _store(ctx: Context | None, repo: str) -> records.Repo:
+    try:
+        return RECORDS.open(ctx.headers if ctx else None, repo or None)
+    except records.RecordsError as e:
+        raise ToolError(str(e))
+
+
+@server.tool(title="Check the records connection", annotations=READ_ONLY)
+@guarded
+def records_status(repo: Repo = "", ctx: Context | None = None) -> dict[str, Any]:
+    """Use when setting up records on GitHub, or when a records_ tool fails. Says whether direct loading is on, whether the person's GitHub sign-in or account reached the server (header names
+    only, never their values) and whether their records repository answers, with its latest commit. Reads nothing else."""
+    return RECORDS.status(ctx.headers if ctx else None, repo or None)
+
+
+@server.tool(title="List records", annotations=READ_ONLY)
+@guarded
+def records_list(
+    folder: Annotated[str, Field(description="Folder in the records repository, for example `facts` or `jobs/fabrikam-se`. Empty for the top level.")] = "",
+    repo: Repo = "",
+    ref: Ref = "",
+    ctx: Context | None = None,
+) -> dict[str, Any]:
+    """Use to see which records a person has in their GitHub records repository: files and folders directly inside one folder, each with its `sha`. Returns `records_commit` to pin later reads."""
+    store = _store(ctx, repo)
+    try:
+        commit = records.check_ref(ref) or store.head()
+        return {"records_commit": commit, "items": store.list(folder, commit)}
+    except records.RecordsError as e:
+        raise ToolError(str(e))
+
+
+@server.tool(title="Read records", annotations=READ_ONLY)
+@guarded
+def records_read(
+    paths: Annotated[list[str], Field(description="Paths of record files to read, for example [\"profile.md\", \"rules.md\"]. A path ending in `/` reads every file directly in that folder.")],
+    repo: Repo = "",
+    ref: Ref = "",
+    ctx: Context | None = None,
+) -> dict[str, Any]:
+    """Use to read record files from the person's GitHub records repository as plain text, each with the `sha` a later records_write needs. Do not read files only to pass them to a check:
+    give the check their paths instead (`skills_path`, `facts_paths` and the like), so the text never has to be copied."""
+    store = _store(ctx, repo)
+    try:
+        commit = records.check_ref(ref) or store.head()
+        files = store.read_many(list(paths or []), commit)
+    except records.RecordsError as e:
+        raise ToolError(str(e))
+    return {"records_commit": commit, "files": files}
+
+
+@server.tool(title="Save a record", annotations=WRITE)
+@guarded
+def records_write(
+    path: Annotated[str, Field(description="Path of the record file, for example `facts/northwind-se.yaml` or `jobs/fabrikam-se/selection.yaml`.")],
+    text: Annotated[str, Field(description="The whole new file text, plain text (not base64).")],
+    sha: Annotated[str, Field(description="The `sha` of the file as you read it (records_read or records_list). Empty only for a new file. A file changed since then is refused.")] = "",
+    message: Annotated[str, Field(description="One line saying what changed, kept in the repository's history.")] = "",
+    repo: Repo = "",
+    ctx: Context | None = None,
+) -> dict[str, Any]:
+    """Use to save one record file in the person's GitHub records repository: a new version of the whole file in one call, kept in Git history (no _history copies). Refused when the file
+    changed since you read it: read it again, merge, show the person what differs, then save. Validate first (build_index for facts, lint_resume or lint_cover for a selection or letter)."""
+    store = _store(ctx, repo)
+    if not isinstance(text, str) or not text.strip():
+        raise ToolError("text is required")
+    try:
+        return store.write(path, text, sha, message)
+    except records.RecordsError as e:
+        raise ToolError(str(e))
 
 
 # ---------------------------------------------------------------- public postings
@@ -460,12 +633,13 @@ class TokenGate:
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http" and scope["path"] != "/healthz":
-            got = b""
+            got, bearer = b"", b""
             for key, value in scope["headers"]:
                 if key == b"x-career-token":
                     got = value.strip()
                 elif key == b"authorization" and value[:7].lower() == b"bearer ":
-                    got = value[7:].strip()
+                    bearer = value[7:].strip()
+            got = got or bearer         # X-Career-Token wins, so a gateway can send the person's own token in Authorization
             if not hmac.compare_digest(got, self.token):
                 # Enough to tell a caller that sent no token (a gateway that dropped the header) from one that sent a wrong one. Never the value.
                 log.warning("unauthorized request to %s: token header %s", scope["path"], "missing" if not got else "present but wrong")
@@ -486,6 +660,8 @@ def main() -> None:
     import uvicorn
     logging.getLogger().setLevel(LOG_LEVEL)
     token = os.environ.get("CAREER_MCP_TOKEN", "").strip() or None
+    if not token and RECORDS.cfg.mode == "app":
+        sys.exit("CAREER_RECORDS=app trusts the gateway's identity header, so CAREER_MCP_TOKEN must be set: only the gateway may call this server.")
     if not token:
         if os.environ.get("CAREER_MCP_ALLOW_UNSECURED") != "1":
             sys.exit("CAREER_MCP_TOKEN is not set. Refusing to start: without it anyone who can reach this port can call the tools. "
