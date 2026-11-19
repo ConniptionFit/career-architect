@@ -187,6 +187,25 @@ class UserTokenMode(unittest.TestCase):
         self.assertNotIn(TOKEN, blob)
         self.assertNotIn("secret-ish", blob)
 
+    def test_a_new_empty_repository_is_reachable_and_the_first_save_creates_it(self):
+        """GitHub answers 409 'Git Repository is empty' to commits/HEAD until the first commit; that is not a stale file."""
+        self.sim.add_empty_repo("new-person/career-records", token="gho_new")
+        who = Ctx({"X-GitHub-Token": "gho_new"})
+        repo = "new-person/career-records"
+        status = call(srv.records_status, repo=repo, ctx=who)
+        self.assertTrue(status["reachable"], status)
+        self.assertTrue(status["empty"])
+        self.assertEqual(status["commit"], "")
+        self.assertEqual(call(srv.records_list, repo=repo, ctx=who)["items"], [])
+        with self.assertRaisesRegex(ToolError, "no files yet"):
+            call(srv.records_read, paths=["profile.md"], repo=repo, ctx=who)
+        saved = call(srv.records_write, path="profile.md", text="---\nname: New\n---\n", repo=repo, ctx=who)
+        self.assertTrue(saved["created"])
+        after = call(srv.records_status, repo=repo, ctx=who)
+        self.assertTrue(after["reachable"])
+        self.assertNotIn("empty", after)
+        self.assertEqual(call(srv.records_read, paths=["profile.md"], repo=repo, ctx=who)["files"][0]["text"], "---\nname: New\n---\n")
+
     def test_a_document_must_come_as_text_or_path(self):
         with self.assertRaisesRegex(ToolError, "skills_md is required"):
             call(srv.match, profile_path="profile.md", requirements="okta:must", repo=REPO, ctx=user())

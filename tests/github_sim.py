@@ -50,6 +50,14 @@ class GitHubSim:
             self.installations[repo] = installation
         return commit
 
+    def add_empty_repo(self, repo: str, token: str | None = None, installation: int | None = None) -> None:
+        """A repository with no commit yet: GitHub answers 409 'Git Repository is empty.' to commits/HEAD and 404 to contents."""
+        self.repos[repo] = []
+        if token:
+            self.tokens.setdefault(token, set()).add(repo)
+        if installation:
+            self.installations[repo] = installation
+
     def head(self, repo: str) -> str:
         return self.repos[repo][-1][0]
 
@@ -109,10 +117,16 @@ class GitHubSim:
                     return self._send(404 if token else 401, {"message": "Not Found"})
                 history = sim.repos[repo]
                 if parts[3] == "commits" and parts[4:] == ["HEAD"] and method == "GET":
+                    if not history:
+                        return self._send(409, {"message": "Git Repository is empty."})
                     return self._send(200, history[-1][0].encode(), "application/vnd.github.sha")
                 if parts[3] != "contents":
                     return self._send(404, {"message": "Not Found"})
                 path = "/".join(parts[4:])
+                if not history and method == "GET":
+                    return self._send(404, {"message": "This repository is empty."})
+                if not history:
+                    history.append((sim._commit({}), {}))        # the first PUT creates the first commit
                 if method == "GET":
                     ref = q.get("ref") or history[-1][0]
                     snap = next((f for c, f in history if c == ref), None)

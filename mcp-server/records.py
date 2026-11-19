@@ -197,6 +197,7 @@ class Repo:
 
     def __init__(self, repo: str, token: str):
         self.repo, self.token = repo, token
+        self.empty = False          # set by head(): a repository with no commit yet (GitHub answers 409 "empty")
 
     def _url(self, *parts: str, **query: str) -> str:
         path = "/".join(urllib.parse.quote(p, safe="/") for p in parts)
@@ -206,12 +207,19 @@ class Repo:
     def head(self) -> str:
         """The commit the default branch points at now. Reads in one task pin to it so every check sees the same version."""
         status, body = _request("GET", self._url("commits", "HEAD"), self.token, accept="application/vnd.github.sha")
+        if status == 409 and b"empty" in body.lower():
+            # A new repository has no commit, so there is nothing to pin yet: an empty `ref` reads the default branch. The first
+            # records_write creates the first commit.
+            self.empty = True
+            return ""
         if status != 200:
             raise _fail(status, f"the repository {self.repo}")
         return body.decode().strip()
 
     def list(self, directory: str, ref: str) -> list[dict]:
         directory = check_path(directory, directory=True)
+        if self.empty:
+            return []
         status, body = _request("GET", self._url("contents", directory, ref=ref) if directory else self._url("contents", ref=ref), self.token)
         if status != 200:
             raise _fail(status, f"the folder {directory or '/'}")
@@ -223,6 +231,8 @@ class Repo:
 
     def read(self, path: str, ref: str) -> dict:
         path = check_path(path)
+        if self.empty:
+            raise RecordsError(f"{path}: not found. The repository has no files yet")
         status, body = _request("GET", self._url("contents", path, ref=ref), self.token)
         if status != 200:
             raise _fail(status, path)
@@ -313,7 +323,10 @@ class Records:
             return out
         try:
             r = self.open(headers, repo)
-            out.update(repo=r.repo, reachable=True, commit=r.head())
+            commit = r.head()
+            out.update(repo=r.repo, reachable=True, commit=commit)
+            if r.empty:
+                out["empty"] = True     # no commit yet: fine, the first records_write creates it
         except RecordsError as e:
             out.update(reachable=False, problem=str(e))
         return out
