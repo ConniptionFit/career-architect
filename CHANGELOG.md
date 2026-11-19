@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: a new, empty records repository is reachable.** GitHub answers `409 Git Repository is empty` to the "latest commit" request until the first commit, and the server reported every 409 as "the file changed since you read it". `records_status` now says `reachable: true` with `empty: true`, `records_list` returns no items, a read says the repository has no files yet, and the first `records_write` creates the first commit. Server code change only; no tool or skill change.
+
 ## 2.9.0, server 1.5.0 (2026-11-19)
 
 - **Fix: the image build.** `.dockerignore` lets only listed files into the build context and did not list `mcp-server/records.py`, so the build failed at `COPY mcp-server/records.py` on the host (the running container was untouched). Listed now, and a new test checks every `COPY` source against `.dockerignore`.
